@@ -1,0 +1,97 @@
+﻿<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="FlashCardsApp.MainPage"
+             Title="Flash Cards"
+             BackgroundColor="{StaticResource Gray950}">
+    <ContentPage.Resources>
+        <Style TargetType="Label">
+            <Setter Property="TextColor" Value="White" />
+        </Style>
+    </ContentPage.Resources>
+
+    <ScrollView x:Name="PageScroll">
+    <Grid x:Name="Workspace" Padding="16" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,500,Auto,Auto">
+        <Grid Grid.Row="0" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+            <Button Grid.Column="0" Text="Add Image" Clicked="OnAddImageClicked" />
+            <Button Grid.Column="1" Text="Load Data" Clicked="OnLoadDataClicked" />
+            <Button Grid.Column="2" Text="Generate Data" Clicked="OnGenerateDataClicked" />
+        </Grid>
+
+        <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+            <Button Grid.Column="0" Text="Increment Data" Clicked="OnIncrementDataClicked" />
+            <Button Grid.Column="1" Text="Edit" Clicked="OnEditClicked" />
+            <Button Grid.Column="2" Text="Clear Area" Clicked="OnClearClicked" />
+        </Grid>
+
+        <Grid Grid.Row="2" ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
+            <Label Text="FLASH AREA" FontAttributes="Bold" FontSize="18" VerticalOptions="Center" />
+            <Label x:Name="CardCountLabel" Grid.Column="1" Text="0 cards on hand" TextColor="{StaticResource Secondary}" VerticalOptions="Center" />
+            <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" VerticalOptions="Center" />
+            <Button x:Name="MaximizeButton" Grid.Column="3" Text="Maximize" Clicked="OnMaximizeClicked" />
+        </Grid>
+
+        <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="16" MinimumHeightRequest="460" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
+            <Grid RowDefinitions="*,Auto,Auto" RowSpacing="10">
+                <Image x:Name="FlashImage" Grid.Row="0" Source="dotnet_bot.png" Aspect="AspectFit">
+                    <Image.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnFlashImageTapped" />
+                    </Image.GestureRecognizers>
+                </Image>
+                <VerticalStackLayout Grid.Row="0" HorizontalOptions="End" VerticalOptions="Start" Spacing="4">
+                    <Button x:Name="MinimizeButton" Text="Minimize" WidthRequest="110" IsVisible="False" Clicked="OnMinimizeClicked" />
+                    <Button Text="Zoom In" WidthRequest="110" Clicked="OnZoomInClicked" />
+                    <Button Text="Zoom Out" WidthRequest="110" Clicked="OnZoomOutClicked" />
+                    <Button x:Name="ResetZoomButton" Text="Reset" WidthRequest="110" IsEnabled="False" Clicked="OnResetZoomClicked" />
+                </VerticalStackLayout>
+                <Label x:Name="CardNameLabel" Grid.Row="1" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                <HorizontalStackLayout Grid.Row="2" HorizontalOptions="Center" Spacing="8">
+                    <Button Text="↻ Roll" WidthRequest="110" Clicked="OnRollClicked" />
+                    <Button Text="Flash" WidthRequest="110" Clicked="OnFlashClicked" />
+                    <Button Text="Flash All" WidthRequest="110" Clicked="OnFlashAllClicked" />
+                </HorizontalStackLayout>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="4" Padding="10" Stroke="{StaticResource Gray600}" StrokeThickness="2" StrokeShape="RoundRectangle 12">
+        <Grid RowDefinitions="Auto,*" RowSpacing="6">
+            <Grid ColumnDefinitions="*,Auto">
+                <HorizontalStackLayout Spacing="8">
+                    <Label Text="DISCARD AREA" FontAttributes="Bold" FontSize="18" />
+                    <Label x:Name="DiscardCountLabel" Text="0 discarded" TextColor="{StaticResource Secondary}" VerticalOptions="Center" />
+                </HorizontalStackLayout>
+                <HorizontalStackLayout Grid.Column="1" Spacing="6">
+                    <Button x:Name="SelectAllButton" Text="Select All" IsEnabled="False" Clicked="OnSelectAllClicked" />
+                    <Button x:Name="ReturnButton" Text="Return Card" IsEnabled="False" Clicked="OnReturnClicked" />
+                    <Button x:Name="DeleteButton" Text="Delete" IsEnabled="False" Clicked="OnDeleteClicked" />
+                </HorizontalStackLayout>
+            </Grid>
+            <CollectionView x:Name="DiscardCollection" Grid.Row="1" HeightRequest="150" ItemsSource="{Binding DiscardedCards}" SelectionMode="Multiple" SelectionChanged="OnDiscardSelectionChanged">
+                <CollectionView.ItemsLayout>
+                    <LinearItemsLayout Orientation="Horizontal" ItemSpacing="10" />
+                </CollectionView.ItemsLayout>
+                <CollectionView.EmptyView>
+                    <Label Text="Discarded cards appear here" TextColor="{StaticResource Gray300}" HorizontalOptions="Center" VerticalOptions="Center" />
+                </CollectionView.EmptyView>
+                <CollectionView.ItemTemplate>
+                    <DataTemplate>
+                        <Border WidthRequest="130" Padding="6" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 10">
+                            <Grid RowDefinitions="*,Auto">
+                                <Image Grid.Row="0" Source="{Binding FrontImage}" Aspect="AspectFit" />
+                                <Label Grid.Row="1" Text="{Binding Name}" LineBreakMode="TailTruncation" HorizontalTextAlignment="Center" />
+                            </Grid>
+                        </Border>
+                    </DataTemplate>
+                </CollectionView.ItemTemplate>
+            </CollectionView>
+        </Grid>
+        </Border>
+
+        <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+            <Label Text="Generated file:" VerticalOptions="Center" />
+            <Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" />
+            <Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsEnabled="False" Clicked="OnLocateClicked" />
+        </Grid>
+        <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
+    </Grid>
+    </ScrollView>
+</ContentPage>
