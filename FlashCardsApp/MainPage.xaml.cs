@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -13,6 +14,10 @@ public partial class MainPage : ContentPage
     private bool _isMaximized;
     private double _imageScale = 1;
     private string? _generatedFilePath;
+    private CancellationTokenSource? _autoRollCancellation;
+    private TaskCompletionSource<bool>? _autoRollResumeSignal;
+    private bool _autoRollPaused;
+    private double? _autoRollSeconds;
 
     public ObservableCollection<FlashCard> Cards { get; } = new();
     public ObservableCollection<FlashCard> DiscardedCards { get; } = new();
@@ -26,6 +31,12 @@ public partial class MainPage : ContentPage
     }
 
     private FlashCard? CurrentCard => _currentCard;
+
+    protected override void OnDisappearing()
+    {
+        StopAutoRoll();
+        base.OnDisappearing();
+    }
 
     private async void OnAddImageClicked(object? sender, EventArgs e)
     {
@@ -301,14 +312,7 @@ public partial class MainPage : ContentPage
 
     private async void OnFlashImageTapped(object? sender, TappedEventArgs e)
     {
-        if (CurrentCard is null)
-            return;
-
-        var angle = _showingBack ? -90 : 90;
-        await FlashImage.RotateYTo(angle, 140, Easing.CubicInOut);
-        _showingBack = !_showingBack;
-        RefreshFlashArea();
-        await FlashImage.RotateYTo(0, 140, Easing.CubicInOut);
+        await AnimateFlipAsync();
     }
 
     private void OnZoomInClicked(object? sender, EventArgs e) => SetZoom(Math.Min(_imageScale + .1, 2));
@@ -322,28 +326,24 @@ public partial class MainPage : ContentPage
         ResetZoomButton.IsEnabled = Math.Abs(scale - 1) > .001;
     }
 
-    private void OnRollClicked(object? sender, EventArgs e)
+    private async void OnRollClicked(object? sender, EventArgs e)
     {
-        var available = Cards.Except(DiscardedCards).ToList();
-        if (available.Count == 0)
-            return;
-
-        _currentCard = available[_random.Next(available.Count)];
-        _showingBack = false;
-        RefreshFlashArea();
+        await RollToRandomCardAsync();
     }
 
     private async void OnFlashClicked(object? sender, EventArgs e)
     {
         var available = Cards.Except(DiscardedCards).ToList();
         if (available.Count == 0)
+        {
+            await ShowNoCardsWarningAsync();
             return;
+        }
 
         if (CurrentCard is null || DiscardedCards.Contains(CurrentCard))
         {
-            _currentCard = available[_random.Next(available.Count)];
-            _showingBack = false;
-            RefreshFlashArea();
+            await RollToRandomCardAsync();
+            return;
         }
 
         await MoveCurrentToDiscardAsync();
@@ -369,6 +369,14 @@ public partial class MainPage : ContentPage
             return;
         }
 
+        var confirmed = await DisplayAlert(
+            "Flash all",
+            $"Move all {remaining.Count} cards to the discard area?",
+            "Yes",
+            "No");
+        if (!confirmed)
+            return;
+
         foreach (var card in remaining)
         {
             _currentCard = card;
@@ -380,6 +388,7 @@ public partial class MainPage : ContentPage
         _currentCard = Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
+        await ShowNoCardsWarningAsync();
     }
 
     private async Task MoveCurrentToDiscardAsync()
@@ -391,11 +400,180 @@ public partial class MainPage : ContentPage
             DiscardedCards.Insert(0, CurrentCard);
 
         var available = Cards.Except(DiscardedCards).ToList();
-        _currentCard = available.Count == 0 ? null : available[_random.Next(available.Count)];
+        if (available.Count == 0)
+        {
+            _currentCard = null;
+            _showingBack = false;
+            RefreshFlashArea();
+            await ShowNoCardsWarningAsync();
+            return;
+        }
+
+        await AnimateCardChangeAsync(available[_random.Next(available.Count)]);
+    }
+
+    private async Task AnimateFlipAsync()
+    {
+        if (CurrentCard is null)
+            return;
+
+        var angle = _showingBack ? -90 : 90;
+        await FlashImage.RotateYTo(angle, 180, Easing.CubicInOut);
+        _showingBack = !_showingBack;
+        RefreshFlashArea();
+        await FlashImage.RotateYTo(0, 180, Easing.CubicInOut);
+    }
+
+    private async Task AnimateCardChangeAsync(FlashCard card)
+    {
+        await FlashImage.RotateYTo(90, 180, Easing.CubicInOut);
+        _currentCard = card;
         _showingBack = false;
         RefreshFlashArea();
-        UpdateDiscardActions();
-        await Task.CompletedTask;
+        await FlashImage.RotateYTo(0, 180, Easing.CubicInOut);
+    }
+
+    private async Task RollToRandomCardAsync()
+    {
+        var available = Cards.Except(DiscardedCards).ToList();
+        if (available.Count == 0)
+        {
+            await ShowNoCardsWarningAsync();
+            return;
+        }
+
+        await AnimateCardChangeAsync(available[_random.Next(available.Count)]);
+    }
+
+    private async void OnAutoRollClicked(object? sender, EventArgs e)
+    {
+        if (!Cards.Except(DiscardedCards).Any())
+        {
+            await ShowNoCardsWarningAsync();
+            return;
+        }
+
+        var input = await DisplayPromptAsync(
+            "Auto Roll",
+            "How many seconds should each card cycle take?",
+            initialValue: _autoRollSeconds?.ToString(CultureInfo.CurrentCulture) ?? "2");
+        if (input is null)
+            return;
+
+        if (!TryParsePositiveSeconds(input, out var seconds))
+        {
+            await DisplayAlert("Auto Roll", "Enter a positive number of seconds.", "OK");
+            return;
+        }
+
+        StopAutoRoll();
+        _autoRollSeconds = seconds;
+        _autoRollPaused = false;
+        _autoRollCancellation = new CancellationTokenSource();
+        UpdateAutoRollActions();
+
+        await RollToRandomCardAsync();
+
+        _ = RunAutoRollAsync(_autoRollCancellation.Token);
+        StatusLabel.Text = $"Auto Roll running ({seconds:0.##} seconds)";
+    }
+
+    private void OnStopClicked(object? sender, EventArgs e)
+    {
+        StopAutoRoll();
+        StatusLabel.Text = "Auto Roll stopped";
+    }
+
+    private void OnPauseClicked(object? sender, EventArgs e)
+    {
+        if (_autoRollCancellation is null)
+            return;
+
+        _autoRollPaused = !_autoRollPaused;
+        if (!_autoRollPaused)
+            _autoRollResumeSignal?.TrySetResult(true);
+
+        PauseButton.Text = _autoRollPaused ? "Play" : "Pause";
+        StatusLabel.Text = _autoRollPaused ? "Auto Roll paused" : "Auto Roll running";
+    }
+
+    private async Task RunAutoRollAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (true)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(_autoRollSeconds!.Value / 2), cancellationToken);
+                await WaitForAutoRollResumeAsync(cancellationToken);
+                await AnimateFlipAsync();
+
+                await Task.Delay(TimeSpan.FromSeconds(_autoRollSeconds.Value / 2), cancellationToken);
+                await WaitForAutoRollResumeAsync(cancellationToken);
+                await RollToRandomCardAsync();
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task WaitForAutoRollResumeAsync(CancellationToken cancellationToken)
+    {
+        while (_autoRollPaused)
+        {
+            _autoRollResumeSignal ??= new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await _autoRollResumeSignal.Task.WaitAsync(cancellationToken);
+        }
+    }
+
+    private void StopAutoRoll()
+    {
+        _autoRollPaused = false;
+        _autoRollResumeSignal?.TrySetResult(true);
+        _autoRollCancellation?.Cancel();
+        _autoRollCancellation?.Dispose();
+        _autoRollCancellation = null;
+        _autoRollResumeSignal = null;
+        _autoRollSeconds = null;
+        UpdateAutoRollActions();
+    }
+
+    private void UpdateAutoRollActions()
+    {
+        var isRunning = _autoRollCancellation is not null;
+        var cardsOnHand = Cards.Except(DiscardedCards).Count();
+        var hasDiscardedCards = DiscardedCards.Count > 0;
+        var hasSelection = DiscardCollection.SelectedItems?.Count > 0;
+        var canUseOtherActions = !isRunning;
+
+        AutoRollButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
+        StopButton.IsEnabled = isRunning;
+        PauseButton.IsEnabled = isRunning;
+        PauseButton.Text = _autoRollPaused ? "Play" : "Pause";
+
+        AddImageButton.IsEnabled = canUseOtherActions;
+        LoadDataButton.IsEnabled = canUseOtherActions;
+        GenerateDataButton.IsEnabled = canUseOtherActions;
+        IncrementDataButton.IsEnabled = canUseOtherActions;
+        EditButton.IsEnabled = canUseOtherActions;
+        ClearAreaButton.IsEnabled = canUseOtherActions;
+        ZoomInButton.IsEnabled = canUseOtherActions;
+        ZoomOutButton.IsEnabled = canUseOtherActions;
+        ResetZoomButton.IsEnabled = canUseOtherActions && Math.Abs(_imageScale - 1) > .001;
+        RollButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
+        FlashButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
+        FlashAllButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
+        SelectAllButton.IsEnabled = canUseOtherActions && hasDiscardedCards;
+        ReturnButton.IsEnabled = canUseOtherActions && hasDiscardedCards && hasSelection;
+        DeleteButton.IsEnabled = canUseOtherActions && hasDiscardedCards;
+        LocateButton.IsEnabled = canUseOtherActions && _generatedFilePath is not null;
+    }
+
+    private static bool TryParsePositiveSeconds(string input, out double seconds)
+    {
+        return (double.TryParse(input, NumberStyles.Float, CultureInfo.CurrentCulture, out seconds) ||
+                double.TryParse(input, NumberStyles.Float, CultureInfo.InvariantCulture, out seconds)) &&
+               double.IsFinite(seconds) && seconds > 0;
     }
 
     private void OnDiscardSelectionChanged(object? sender, SelectionChangedEventArgs e) => UpdateDiscardActions();
@@ -416,9 +594,17 @@ public partial class MainPage : ContentPage
         DeleteButton.BackgroundColor = hasDiscardedCards
             ? Color.FromArgb("#B71C1C")
             : (Color)Application.Current!.Resources["Gray600"];
-        CardCountLabel.Text = $"{Cards.Except(DiscardedCards).Count()} cards on hand";
+        var cardsOnHand = Cards.Except(DiscardedCards).Count();
+        RollButton.IsEnabled = cardsOnHand > 0;
+        FlashButton.IsEnabled = cardsOnHand > 0;
+        FlashAllButton.IsEnabled = cardsOnHand > 0;
+        CardCountLabel.Text = $"{cardsOnHand} cards on hand";
         DiscardCountLabel.Text = $"{DiscardedCards.Count} discarded";
+        UpdateAutoRollActions();
     }
+
+    private Task ShowNoCardsWarningAsync() =>
+        DisplayAlert("No cards available", "There are no more cards to flash or roll.", "OK");
 
     private void OnReturnClicked(object? sender, EventArgs e)
     {
@@ -463,7 +649,7 @@ public partial class MainPage : ContentPage
     {
         _isMaximized = false;
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
-            Workspace.RowDefinitions[i].Height = i == 3 ? new GridLength(500) : GridLength.Auto;
+            Workspace.RowDefinitions[i].Height = i == 4 ? new GridLength(500) : GridLength.Auto;
 
         MaximizeButton.IsVisible = true;
         MinimizeButton.IsVisible = false;
@@ -474,8 +660,8 @@ public partial class MainPage : ContentPage
     private void ApplyMaximizeState()
     {
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
-            Workspace.RowDefinitions[i].Height = _isMaximized && i != 3 ? new GridLength(0) : GridLength.Auto;
-        Workspace.RowDefinitions[3].Height = _isMaximized ? new GridLength(1, GridUnitType.Star) : new GridLength(500);
+            Workspace.RowDefinitions[i].Height = _isMaximized && i != 4 ? new GridLength(0) : GridLength.Auto;
+        Workspace.RowDefinitions[4].Height = _isMaximized ? new GridLength(1, GridUnitType.Star) : new GridLength(500);
         MaximizeButton.IsVisible = !_isMaximized;
         MinimizeButton.IsVisible = _isMaximized;
     }
