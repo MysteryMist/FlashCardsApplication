@@ -20,7 +20,7 @@
         <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
             <Button x:Name="AddImageButton" Grid.Column="0" Text="Add Image" Clicked="OnAddImageClicked" />
             <Button x:Name="LoadDataButton" Grid.Column="1" Text="Load Data" Clicked="OnLoadDataClicked" />
-            <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Generate Data" Clicked="OnGenerateDataClicked" />
+            <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Export JSON" Clicked="OnGenerateDataClicked" />
         </Grid>
 
         <Grid Grid.Row="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">

@@ -1,8 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using CommunityToolkit.Maui.Storage;
 
 namespace FlashCardsApp;
 
@@ -133,7 +135,7 @@ public partial class MainPage : ContentPage
     {
         if (!Cards.Any())
         {
-            await DisplayAlert("Generate data", "Add or load at least one card first.", "OK");
+            await DisplayAlert("Export JSON", "Add or load at least one card first.", "OK");
             return;
         }
 
@@ -141,19 +143,32 @@ public partial class MainPage : ContentPage
         {
             ValidateCards(Cards);
             var generateConfirmed = await DisplayAlert(
-                "Generate data",
-                $"Validated {Cards.Count} cards. Generate the JSON file now?",
+                "Export JSON",
+                $"Validated {Cards.Count} cards. Save the JSON file now?",
                 "Yes",
                 "No");
             if (!generateConfirmed)
                 return;
 
-            _generatedFilePath = Path.Combine(FileSystem.Current.AppDataDirectory, $"flashcards-{DateTime.Now:yyyyMMdd-HHmmss}.json");
             var payload = new FlashCardDocument { Cards = Cards.ToList() };
-            await File.WriteAllTextAsync(_generatedFilePath, JsonSerializer.Serialize(payload, JsonOptions));
+            var json = JsonSerializer.Serialize(payload, JsonOptions);
+            await using var jsonStream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+            var fileName = $"flashcards-{DateTime.Now:yyyyMMdd-HHmmss}.json";
+            var saveResult = await FileSaver.Default.SaveAsync(fileName, jsonStream);
+
+            if (!saveResult.IsSuccessful)
+            {
+                if (saveResult.Exception is not null)
+                    throw saveResult.Exception;
+
+                StatusLabel.Text = "Export canceled";
+                return;
+            }
+
+            _generatedFilePath = saveResult.FilePath;
             GeneratedPathLabel.Text = _generatedFilePath;
-            LocateButton.IsEnabled = true;
-            StatusLabel.Text = "Data generated and validated";
+            LocateButton.IsEnabled = !string.IsNullOrWhiteSpace(_generatedFilePath);
+            StatusLabel.Text = "JSON exported successfully";
         });
     }
 
