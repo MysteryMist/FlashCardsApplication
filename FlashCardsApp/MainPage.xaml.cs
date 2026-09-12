@@ -20,6 +20,12 @@ public partial class MainPage : ContentPage
     private TaskCompletionSource<bool>? _autoRollResumeSignal;
     private bool _autoRollPaused;
     private double? _autoRollSeconds;
+    private bool _shuffleEnabled;
+    private bool _stateLoaded;
+    private const double NormalFlashAreaHeight = 400;
+    private const double MaximizedBottomReserve = 96;
+
+    private static string SavedStatePath => Path.Combine(FileSystem.Current.AppDataDirectory, "flashcards-state.json");
 
     public ObservableCollection<FlashCard> Cards { get; } = new();
     public ObservableCollection<FlashCard> DiscardedCards { get; } = new();
@@ -30,6 +36,16 @@ public partial class MainPage : ContentPage
         BindingContext = this;
         UpdateDiscardActions();
         RefreshFlashArea();
+    }
+
+    protected override async void OnAppearing()
+    {
+        base.OnAppearing();
+        if (_stateLoaded)
+            return;
+
+        _stateLoaded = true;
+        await LoadSavedStateAsync();
     }
 
     private FlashCard? CurrentCard => _currentCard;
@@ -61,6 +77,7 @@ public partial class MainPage : ContentPage
         _currentCard = card;
         _showingBack = false;
         RefreshFlashArea();
+        await SaveStateAsync();
         StatusLabel.Text = string.IsNullOrWhiteSpace(draft.BackPath) ? "Added (no back image)" : "Card added";
     }
 
@@ -92,6 +109,7 @@ public partial class MainPage : ContentPage
             _currentCard = Cards[0];
             _showingBack = false;
             RefreshFlashArea();
+            await SaveStateAsync();
             StatusLabel.Text = $"Loaded {Cards.Count} cards";
         });
     }
@@ -127,6 +145,7 @@ public partial class MainPage : ContentPage
 
             _currentCard ??= Cards.FirstOrDefault();
             RefreshFlashArea();
+            await SaveStateAsync();
             StatusLabel.Text = $"Merged {imported.Count} cards";
         });
     }
@@ -224,6 +243,7 @@ public partial class MainPage : ContentPage
         }
 
         RefreshFlashArea();
+        await SaveStateAsync();
     }
 
     private async Task<bool> ConfigureFrontImageAsync(NewCardDraft draft)
@@ -334,6 +354,37 @@ public partial class MainPage : ContentPage
     private void OnZoomOutClicked(object? sender, EventArgs e) => SetZoom(Math.Max(_imageScale - .1, .6));
     private void OnResetZoomClicked(object? sender, EventArgs e) => SetZoom(1);
 
+    private void OnShuffleToggled(object? sender, ToggledEventArgs e)
+    {
+        _shuffleEnabled = e.Value;
+        StatusLabel.Text = _shuffleEnabled ? "Shuffle enabled" : "Shuffle disabled";
+    }
+
+    private async void OnPreviousClicked(object? sender, EventArgs e) => await NavigateCardAsync(-1);
+    private async void OnNextClicked(object? sender, EventArgs e) => await NavigateCardAsync(1);
+
+    private async Task NavigateCardAsync(int direction)
+    {
+        var available = Cards.Except(DiscardedCards).ToList();
+        if (available.Count == 0)
+        {
+            await ShowNoCardsWarningAsync();
+            return;
+        }
+
+        if (_shuffleEnabled)
+        {
+            await AnimateCardChangeAsync(available[_random.Next(available.Count)]);
+            return;
+        }
+
+        var currentIndex = CurrentCard is null ? -1 : available.IndexOf(CurrentCard);
+        var nextIndex = currentIndex < 0
+            ? direction > 0 ? 0 : available.Count - 1
+            : (currentIndex + direction + available.Count) % available.Count;
+        await AnimateCardChangeAsync(available[nextIndex]);
+    }
+
     private void SetZoom(double scale)
     {
         _imageScale = scale;
@@ -403,6 +454,7 @@ public partial class MainPage : ContentPage
         _currentCard = Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
+        await SaveStateAsync();
         await ShowNoCardsWarningAsync();
     }
 
@@ -414,17 +466,21 @@ public partial class MainPage : ContentPage
         if (!DiscardedCards.Contains(CurrentCard))
             DiscardedCards.Insert(0, CurrentCard);
 
+        await SaveStateAsync();
+
         var available = Cards.Except(DiscardedCards).ToList();
         if (available.Count == 0)
         {
             _currentCard = null;
             _showingBack = false;
             RefreshFlashArea();
+            await SaveStateAsync();
             await ShowNoCardsWarningAsync();
             return;
         }
 
-        await AnimateCardChangeAsync(available[_random.Next(available.Count)]);
+        await NavigateCardAsync(1);
+        await SaveStateAsync();
     }
 
     private async Task AnimateFlipAsync()
@@ -457,7 +513,15 @@ public partial class MainPage : ContentPage
             return;
         }
 
-        await AnimateCardChangeAsync(available[_random.Next(available.Count)]);
+        if (_shuffleEnabled)
+        {
+            await AnimateCardChangeAsync(available[_random.Next(available.Count)]);
+            return;
+        }
+
+        var currentIndex = CurrentCard is null ? -1 : available.IndexOf(CurrentCard);
+        var nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % available.Count;
+        await AnimateCardChangeAsync(available[nextIndex]);
     }
 
     private async void OnAutoRollClicked(object? sender, EventArgs e)
@@ -582,6 +646,50 @@ public partial class MainPage : ContentPage
         ReturnButton.IsEnabled = canUseOtherActions && hasDiscardedCards && hasSelection;
         DeleteButton.IsEnabled = canUseOtherActions && hasDiscardedCards;
         LocateButton.IsEnabled = canUseOtherActions && _generatedFilePath is not null;
+
+        UpdateAutoRollButtonColors(isRunning, hasDiscardedCards);
+    }
+
+    private void UpdateAutoRollButtonColors(bool isRunning, bool hasDiscardedCards)
+    {
+        var green = (Color)Application.Current!.Resources["Primary"];
+        var gray = (Color)Application.Current.Resources["Gray600"];
+        var inactiveColor = isRunning ? gray : green;
+
+        foreach (var button in new[]
+        {
+            AutoRollButton,
+            AddImageButton,
+            LoadDataButton,
+            GenerateDataButton,
+            IncrementDataButton,
+            EditButton,
+            ClearAreaButton,
+            ZoomInButton,
+            ZoomOutButton,
+            ResetZoomButton,
+            RollButton,
+            FlashButton,
+            FlashAllButton,
+            SelectAllButton,
+            ReturnButton,
+            LocateButton,
+            PreviousButton,
+            NextButton
+        })
+        {
+            button.BackgroundColor = inactiveColor;
+        }
+
+        StopButton.BackgroundColor = isRunning ? green : gray;
+        PauseButton.BackgroundColor = isRunning ? green : gray;
+        MaximizeButton.BackgroundColor = green;
+        MinimizeButton.BackgroundColor = green;
+        DeleteButton.BackgroundColor = isRunning
+            ? gray
+            : hasDiscardedCards
+                ? Color.FromArgb("#B71C1C")
+                : gray;
     }
 
     private static bool TryParsePositiveSeconds(string input, out double seconds)
@@ -621,7 +729,7 @@ public partial class MainPage : ContentPage
     private Task ShowNoCardsWarningAsync() =>
         DisplayAlert("No cards available", "There are no more cards to flash or roll.", "OK");
 
-    private void OnReturnClicked(object? sender, EventArgs e)
+    private async void OnReturnClicked(object? sender, EventArgs e)
     {
         foreach (var card in DiscardCollection.SelectedItems.Cast<FlashCard>().ToList())
             DiscardedCards.Remove(card);
@@ -630,6 +738,7 @@ public partial class MainPage : ContentPage
         _currentCard ??= Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
+        await SaveStateAsync();
     }
 
     private async void OnDeleteClicked(object? sender, EventArgs e)
@@ -640,6 +749,14 @@ public partial class MainPage : ContentPage
             await DisplayAlert("Delete", "Select at least one discarded card before deleting.", "OK");
             return;
         }
+
+        var confirmed = await DisplayAlert(
+            "Delete selected images",
+            "Are you sure you want to delete the selected images?",
+            "Delete",
+            "Cancel");
+        if (!confirmed)
+            return;
 
         foreach (var card in selectedCards)
         {
@@ -652,6 +769,7 @@ public partial class MainPage : ContentPage
             _currentCard = Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
+        await SaveStateAsync();
     }
 
     private void OnMaximizeClicked(object? sender, EventArgs e)
@@ -660,11 +778,18 @@ public partial class MainPage : ContentPage
         ApplyMaximizeState();
     }
 
+    private void OnPageScrollSizeChanged(object? sender, EventArgs e)
+    {
+        if (_isMaximized)
+            ApplyMaximizeState();
+    }
+
     private async void OnMinimizeClicked(object? sender, EventArgs e)
     {
         _isMaximized = false;
+        Workspace.HeightRequest = -1;
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
-            Workspace.RowDefinitions[i].Height = i == 4 ? new GridLength(500) : GridLength.Auto;
+            Workspace.RowDefinitions[i].Height = i == 3 ? new GridLength(NormalFlashAreaHeight) : GridLength.Auto;
 
         MaximizeButton.IsVisible = true;
         MinimizeButton.IsVisible = false;
@@ -674,33 +799,61 @@ public partial class MainPage : ContentPage
 
     private void ApplyMaximizeState()
     {
+        var flashAreaHeight = Math.Max(
+            PageScroll.Height - Workspace.Padding.VerticalThickness - MaximizedBottomReserve,
+            NormalFlashAreaHeight);
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
-            Workspace.RowDefinitions[i].Height = _isMaximized && i != 4 ? new GridLength(0) : GridLength.Auto;
-        Workspace.RowDefinitions[4].Height = _isMaximized ? new GridLength(1, GridUnitType.Star) : new GridLength(500);
+            Workspace.RowDefinitions[i].Height = _isMaximized && i != 3 ? new GridLength(0) : GridLength.Auto;
+        Workspace.HeightRequest = _isMaximized ? flashAreaHeight : -1;
+        Workspace.RowDefinitions[3].Height = _isMaximized ? new GridLength(flashAreaHeight) : new GridLength(NormalFlashAreaHeight);
         MaximizeButton.IsVisible = !_isMaximized;
         MinimizeButton.IsVisible = _isMaximized;
     }
 
     private async void OnLocateClicked(object? sender, EventArgs e)
     {
-        if (_generatedFilePath is null)
+        var generatedPath = _generatedFilePath;
+        if (string.IsNullOrWhiteSpace(generatedPath))
             return;
+
+        if (!File.Exists(generatedPath))
+        {
+            await DisplayAlert("Generated file", "The generated file is no longer available.", "OK");
+            return;
+        }
 
         try
         {
 #if WINDOWS
-            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{_generatedFilePath}\"") { UseShellExecute = true });
+#pragma warning disable CA1416
+            Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{generatedPath}\"") { UseShellExecute = true });
+#pragma warning restore CA1416
+#elif ANDROID
+            var opened = await Launcher.Default.OpenAsync(
+                new OpenFileRequest("Open generated flashcards", new ReadOnlyFile(generatedPath)));
+            if (!opened)
+                await ShareGeneratedFileAsync(generatedPath);
 #else
-            var folder = Path.GetDirectoryName(_generatedFilePath);
+            var folder = Path.GetDirectoryName(generatedPath);
             if (folder is not null)
                 await Launcher.Default.OpenAsync(new Uri($"file://{folder.Replace("\\", "/")}"));
 #endif
         }
-        catch
+        catch (Exception ex)
         {
-            await Share.Default.RequestAsync(new ShareFileRequest("Generated flashcards", new ShareFile(_generatedFilePath)));
+            try
+            {
+                await ShareGeneratedFileAsync(generatedPath);
+            }
+            catch (Exception shareException)
+            {
+                await DisplayAlert("Generated file", $"Unable to open or share the file: {shareException.Message}", "OK");
+            }
         }
     }
+
+    private static Task ShareGeneratedFileAsync(string filePath) =>
+        Share.Default.RequestAsync(new ShareFileRequest("Generated flashcards", new ShareFile(filePath)));
 
     private void RefreshFlashArea()
     {
@@ -802,6 +955,67 @@ public partial class MainPage : ContentPage
         }
     }
 
+    private async Task LoadSavedStateAsync()
+    {
+        if (!File.Exists(SavedStatePath))
+            return;
+
+        try
+        {
+            await using var stream = File.OpenRead(SavedStatePath);
+            var state = await JsonSerializer.DeserializeAsync<FlashCardsState>(stream, JsonOptions);
+            if (state is null || state.Cards.Count == 0)
+                return;
+
+            Cards.Clear();
+            DiscardedCards.Clear();
+            foreach (var card in state.Cards)
+                Cards.Add(card);
+
+            foreach (var index in state.DiscardedCardIndices.Distinct().Where(index => index >= 0 && index < Cards.Count))
+                DiscardedCards.Add(Cards[index]);
+
+            _currentCard = state.CurrentCardIndex is int currentIndex && currentIndex >= 0 && currentIndex < Cards.Count
+                ? Cards[currentIndex]
+                : Cards.Except(DiscardedCards).FirstOrDefault();
+            _showingBack = state.ShowingBack && _currentCard is not null;
+            RefreshFlashArea();
+            StatusLabel.Text = $"Restored {Cards.Count} cards";
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to restore saved flashcards: {ex}");
+            StatusLabel.Text = "Saved data could not be restored";
+        }
+    }
+
+    private async Task SaveStateAsync()
+    {
+        try
+        {
+            var state = new FlashCardsState
+            {
+                Cards = Cards.ToList(),
+                DiscardedCardIndices = DiscardedCards
+                    .Select(card => Cards.IndexOf(card))
+                    .Where(index => index >= 0)
+                    .ToList(),
+                CurrentCardIndex = _currentCard is null ? null : Cards.IndexOf(_currentCard),
+                ShowingBack = _showingBack
+            };
+
+            var temporaryPath = $"{SavedStatePath}.tmp";
+            await using (var stream = File.Create(temporaryPath))
+                await JsonSerializer.SerializeAsync(stream, state, JsonOptions);
+
+            File.Move(temporaryPath, SavedStatePath, true);
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Unable to save flashcards: {ex}");
+        }
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true,
@@ -840,4 +1054,12 @@ public sealed class FlashCardDocument
 {
     [JsonPropertyName("cards")]
     public List<FlashCard> Cards { get; set; } = new();
+}
+
+internal sealed class FlashCardsState
+{
+    public List<FlashCard> Cards { get; set; } = new();
+    public List<int> DiscardedCardIndices { get; set; } = new();
+    public int? CurrentCardIndex { get; set; }
+    public bool ShowingBack { get; set; }
 }

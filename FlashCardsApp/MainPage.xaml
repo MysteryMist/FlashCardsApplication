@@ -4,98 +4,102 @@
              Title="Flash Cards"
              BackgroundColor="{StaticResource Gray950}">
     <ContentPage.Resources>
-        <Style TargetType="Label">
-            <Setter Property="TextColor" Value="White" />
+        <Style TargetType="Label"><Setter Property="TextColor" Value="{StaticResource White}" /></Style>
+        <Style x:Key="PanelTitle" TargetType="Label">
+            <Setter Property="FontAttributes" Value="Bold" /><Setter Property="FontSize" Value="16" />
+        </Style>
+        <Style x:Key="GrayButton" TargetType="Button">
+            <Setter Property="BackgroundColor" Value="{StaticResource Gray600}" />
+        </Style>
+        <Style x:Key="GreenButton" TargetType="Button">
+            <Setter Property="BackgroundColor" Value="{StaticResource Primary}" />
+        </Style>
+        <Style x:Key="NavigationButton" TargetType="Button">
+            <Setter Property="BackgroundColor" Value="{StaticResource Tertiary}" /><Setter Property="CornerRadius" Value="28" />
+            <Setter Property="FontSize" Value="24" /><Setter Property="Padding" Value="0" />
+            <Setter Property="WidthRequest" Value="56" /><Setter Property="HeightRequest" Value="56" />
         </Style>
     </ContentPage.Resources>
 
-    <ScrollView x:Name="PageScroll">
-    <Grid x:Name="Workspace" Padding="16" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,Auto,500,Auto,Auto">
-        <HorizontalStackLayout Grid.Row="0" Spacing="8">
-            <Button x:Name="AutoRollButton" Text="Auto Roll" WidthRequest="110" Clicked="OnAutoRollClicked" />
-            <Button x:Name="StopButton" Text="Stop" WidthRequest="110" IsEnabled="False" Clicked="OnStopClicked" />
-            <Button x:Name="PauseButton" Text="Pause" WidthRequest="110" IsEnabled="False" Clicked="OnPauseClicked" />
-        </HorizontalStackLayout>
+    <ScrollView x:Name="PageScroll" SizeChanged="OnPageScrollSizeChanged">
+        <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,400,Auto,Auto,Auto">
+            <Border Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+                <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
+                    <Label Text="TOP CONTROL PANEL" Style="{StaticResource PanelTitle}" />
+                    <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button x:Name="AutoRollButton" Grid.Column="0" Text="Auto Roll" Style="{StaticResource GrayButton}" Clicked="OnAutoRollClicked" />
+                        <Button x:Name="StopButton" Grid.Column="1" Text="Stop" Style="{StaticResource GrayButton}" IsEnabled="False" Clicked="OnStopClicked" />
+                        <Button x:Name="PauseButton" Grid.Column="2" Text="Pause" Style="{StaticResource GrayButton}" IsEnabled="False" Clicked="OnPauseClicked" />
+                    </Grid>
+                </Grid>
+            </Border>
 
-        <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
-            <Button x:Name="AddImageButton" Grid.Column="0" Text="Add Image" Clicked="OnAddImageClicked" />
-            <Button x:Name="LoadDataButton" Grid.Column="1" Text="Load Data" Clicked="OnLoadDataClicked" />
-            <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Export JSON" Clicked="OnGenerateDataClicked" />
-        </Grid>
+            <Border Grid.Row="1" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+                <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                    <Label Text="DATA MANAGEMENT" Style="{StaticResource PanelTitle}" />
+                    <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button x:Name="AddImageButton" Grid.Column="0" Text="Add Image" Style="{StaticResource GreenButton}" Clicked="OnAddImageClicked" />
+                        <Button x:Name="LoadDataButton" Grid.Column="1" Text="Load Data" Style="{StaticResource GreenButton}" Clicked="OnLoadDataClicked" />
+                        <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Export JSON" Style="{StaticResource GreenButton}" Clicked="OnGenerateDataClicked" />
+                    </Grid>
+                    <Grid Grid.Row="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                        <Button x:Name="IncrementDataButton" Grid.Column="0" Text="Increment" Style="{StaticResource GreenButton}" Clicked="OnIncrementDataClicked" />
+                        <Button x:Name="EditButton" Grid.Column="1" Text="Edit" Style="{StaticResource GreenButton}" Clicked="OnEditClicked" />
+                        <Button x:Name="ClearAreaButton" Grid.Column="2" Text="Clear Area" Style="{StaticResource GreenButton}" Clicked="OnClearClicked" />
+                    </Grid>
+                </Grid>
+            </Border>
 
-        <Grid Grid.Row="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">
-            <Button x:Name="IncrementDataButton" Grid.Column="0" Text="Increment Data" Clicked="OnIncrementDataClicked" />
-            <Button x:Name="EditButton" Grid.Column="1" Text="Edit" Clicked="OnEditClicked" />
-            <Button x:Name="ClearAreaButton" Grid.Column="2" Text="Clear Area" Clicked="OnClearClicked" />
-        </Grid>
-
-        <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8">
-            <Label Text="FLASH AREA" FontAttributes="Bold" FontSize="18" VerticalOptions="Center" />
-            <Label x:Name="CardCountLabel" Grid.Column="1" Text="0 cards on hand" TextColor="{StaticResource Secondary}" VerticalOptions="Center" />
-            <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" VerticalOptions="Center" />
-            <Button x:Name="MaximizeButton" Grid.Column="3" Text="Maximize" Clicked="OnMaximizeClicked" />
-        </Grid>
-
-        <Border x:Name="FlashCardBorder" Grid.Row="4" Padding="16" MinimumHeightRequest="460" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
-            <Grid RowDefinitions="*,Auto,Auto" RowSpacing="10">
-                <Image x:Name="FlashImage" Grid.Row="0" Source="dotnet_bot.png" Aspect="AspectFit">
-                    <Image.GestureRecognizers>
-                        <TapGestureRecognizer Tapped="OnFlashImageTapped" />
-                    </Image.GestureRecognizers>
-                </Image>
-                <VerticalStackLayout Grid.Row="0" HorizontalOptions="End" VerticalOptions="Start" Spacing="4">
-                    <Button x:Name="MinimizeButton" Text="Minimize" WidthRequest="110" IsVisible="False" Clicked="OnMinimizeClicked" />
-                    <Button x:Name="ZoomInButton" Text="Zoom In" WidthRequest="110" Clicked="OnZoomInClicked" />
-                    <Button x:Name="ZoomOutButton" Text="Zoom Out" WidthRequest="110" Clicked="OnZoomOutClicked" />
-                    <Button x:Name="ResetZoomButton" Text="Reset" WidthRequest="110" IsEnabled="False" Clicked="OnResetZoomClicked" />
-                </VerticalStackLayout>
-                <Label x:Name="CardNameLabel" Grid.Row="1" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                <HorizontalStackLayout Grid.Row="2" HorizontalOptions="Center" Spacing="8">
-                    <Button x:Name="RollButton" Text="↻ Roll" WidthRequest="110" Clicked="OnRollClicked" />
-                    <Button x:Name="FlashButton" Text="Flash" WidthRequest="110" Clicked="OnFlashClicked" />
-                    <Button x:Name="FlashAllButton" Text="Flash All" WidthRequest="110" Clicked="OnFlashAllClicked" />
-                </HorizontalStackLayout>
+            <Grid Grid.Row="2" ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+                <VerticalStackLayout Spacing="2"><Label Text="FLASH AREA" Style="{StaticResource PanelTitle}" /><Label x:Name="CardCountLabel" Text="0 cards on hand" TextColor="{StaticResource Secondary}" /></VerticalStackLayout>
+                <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center"><Label Text="Shuffle" VerticalOptions="Center" /><Switch x:Name="ShuffleSwitch" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" Toggled="OnShuffleToggled" /></HorizontalStackLayout>
+                <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" HorizontalOptions="End" VerticalOptions="Center" />
             </Grid>
-        </Border>
 
-        <Border Grid.Row="5" Padding="10" Stroke="{StaticResource Gray600}" StrokeThickness="2" StrokeShape="RoundRectangle 12">
-        <Grid RowDefinitions="Auto,*" RowSpacing="6">
-            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-                <Label Text="DISCARD AREA" FontAttributes="Bold" FontSize="18" VerticalOptions="Center" />
-                <Label x:Name="DiscardCountLabel" Grid.Column="1" Text="0 discarded" TextColor="{StaticResource Secondary}" VerticalOptions="Center" />
-                <HorizontalStackLayout Grid.Column="2" Spacing="6">
-                    <Button x:Name="SelectAllButton" Text="Select All" IsEnabled="False" Clicked="OnSelectAllClicked" />
-                    <Button x:Name="ReturnButton" Text="Return Card" IsEnabled="False" Clicked="OnReturnClicked" />
-                    <Button x:Name="DeleteButton" Text="Delete" IsEnabled="False" Clicked="OnDeleteClicked" />
-                </HorizontalStackLayout>
-            </Grid>
-            <CollectionView x:Name="DiscardCollection" Grid.Row="1" HeightRequest="150" ItemsSource="{Binding DiscardedCards}" SelectionMode="Multiple" SelectionChanged="OnDiscardSelectionChanged">
-                <CollectionView.ItemsLayout>
-                    <LinearItemsLayout Orientation="Horizontal" ItemSpacing="10" />
-                </CollectionView.ItemsLayout>
-                <CollectionView.EmptyView>
-                    <Label Text="Discarded cards appear here" TextColor="{StaticResource Gray300}" HorizontalOptions="Center" VerticalOptions="Center" />
-                </CollectionView.EmptyView>
-                <CollectionView.ItemTemplate>
-                    <DataTemplate>
-                        <Border WidthRequest="130" Padding="6" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 10">
-                            <Grid RowDefinitions="*,Auto">
-                                <Image Grid.Row="0" Source="{Binding FrontImage}" Aspect="AspectFit" />
-                                <Label Grid.Row="1" Text="{Binding Name}" LineBreakMode="TailTruncation" HorizontalTextAlignment="Center" />
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </CollectionView.ItemTemplate>
-            </CollectionView>
-        </Grid>
-        </Border>
+            <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="10" MinimumHeightRequest="400" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
+                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="8">
+                    <Grid Grid.Row="0" ZIndex="2" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
+                        <Button x:Name="MaximizeButton" Grid.Row="0" Grid.Column="0" Text="Maximize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMaximizeClicked" />
+                        <Button x:Name="MinimizeButton" Grid.Row="0" Grid.Column="0" Text="Minimize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" IsVisible="False" Clicked="OnMinimizeClicked" />
+                        <Button x:Name="ResetZoomButton" Grid.Row="0" Grid.Column="1" Text="Reset" Padding="4,8" FontSize="12" IsEnabled="False" Clicked="OnResetZoomClicked" />
+                        <Button x:Name="ZoomInButton" Grid.Row="1" Grid.Column="0" Text="Zoom In" Padding="4,8" FontSize="12" Clicked="OnZoomInClicked" />
+                        <Button x:Name="ZoomOutButton" Grid.Row="1" Grid.Column="1" Text="Zoom Out" Padding="4,8" FontSize="12" Clicked="OnZoomOutClicked" />
+                    </Grid>
+                    <Grid Grid.Row="1" ColumnDefinitions="56,*,56">
+                        <Button x:Name="PreviousButton" Grid.Column="0" Grid.ZIndex="1" Text="‹" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnPreviousClicked" />
+                        <Image x:Name="FlashImage" Grid.Column="1" Grid.ZIndex="0" Source="dotnet_bot.png" Aspect="AspectFit">
+                            <Image.GestureRecognizers><TapGestureRecognizer Tapped="OnFlashImageTapped" /></Image.GestureRecognizers>
+                        </Image>
+                        <Button x:Name="NextButton" Grid.Column="2" Grid.ZIndex="1" Text="›" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnNextClicked" />
+                    </Grid>
+                    <Label x:Name="CardNameLabel" Grid.Row="2" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" />
+                    <Grid Grid.Row="3" ColumnDefinitions="*,*,*" ColumnSpacing="4" MaximumWidthRequest="360" HorizontalOptions="Center">
+                        <Button x:Name="RollButton" Grid.Column="0" Text="↻ Roll" WidthRequest="{OnPlatform Android=-1, Default=80}" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnRollClicked" />
+                        <Button x:Name="FlashButton" Grid.Column="1" Text="Flash" WidthRequest="{OnPlatform Android=-1, Default=80}" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashClicked" />
+                        <Button x:Name="FlashAllButton" Grid.Column="2" Text="Flash All" WidthRequest="{OnPlatform Android=-1, Default=80}" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashAllClicked" />
+                    </Grid>
+                </Grid>
+            </Border>
 
-        <Grid Grid.Row="6" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-            <Label Text="Generated file:" VerticalOptions="Center" />
-            <Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" />
-            <Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsEnabled="False" Clicked="OnLocateClicked" />
+            <Border Grid.Row="4" Padding="10" Stroke="{StaticResource Gray600}" StrokeThickness="2" StrokeShape="RoundRectangle 12">
+                <Grid RowDefinitions="Auto,*" RowSpacing="6">
+                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                        <VerticalStackLayout Spacing="0" VerticalOptions="Center">
+                            <Label Text="DISCARD SECTION" Style="{StaticResource PanelTitle}" />
+                            <Label x:Name="DiscardCountLabel" Text="0 discarded" TextColor="{StaticResource Secondary}" />
+                        </VerticalStackLayout>
+                        <Grid Grid.Column="1" ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="4"><Button x:Name="SelectAllButton" Grid.Column="0" Text="Select All" IsEnabled="False" Clicked="OnSelectAllClicked" /><Button x:Name="ReturnButton" Grid.Column="1" Text="Return" IsEnabled="False" Clicked="OnReturnClicked" /><Button x:Name="DeleteButton" Grid.Column="2" Text="Delete" IsEnabled="False" Clicked="OnDeleteClicked" /></Grid>
+                    </Grid>
+                    <CollectionView x:Name="DiscardCollection" Grid.Row="1" HeightRequest="150" ItemsSource="{Binding DiscardedCards}" SelectionMode="Multiple" SelectionChanged="OnDiscardSelectionChanged">
+                        <CollectionView.ItemsLayout><LinearItemsLayout Orientation="Horizontal" ItemSpacing="10" /></CollectionView.ItemsLayout>
+                        <CollectionView.EmptyView><Label Text="Discarded cards appear here" TextColor="{StaticResource Gray300}" HorizontalOptions="Center" VerticalOptions="Center" /></CollectionView.EmptyView>
+                        <CollectionView.ItemTemplate><DataTemplate><Border WidthRequest="130" Padding="6" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 10"><Grid RowDefinitions="*,Auto"><Image Grid.Row="0" Source="{Binding FrontImage}" Aspect="AspectFit" /><Label Grid.Row="1" Text="{Binding Name}" LineBreakMode="TailTruncation" HorizontalTextAlignment="Center" /></Grid></Border></DataTemplate></CollectionView.ItemTemplate>
+                    </CollectionView>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsEnabled="False" Clicked="OnLocateClicked" /></Grid>
+            <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
         </Grid>
-        <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="7" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
-    </Grid>
     </ScrollView>
 </ContentPage>
