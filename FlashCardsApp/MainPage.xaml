@@ -40,7 +40,7 @@
                     <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
                         <Button x:Name="AddImageButton" Grid.Column="0" Text="Add Image" Style="{StaticResource GreenButton}" Clicked="OnAddImageClicked" />
                         <Button x:Name="LoadDataButton" Grid.Column="1" Text="Load Data" Style="{StaticResource GreenButton}" Clicked="OnLoadDataClicked" />
-                        <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Export JSON" Style="{StaticResource GreenButton}" Clicked="OnGenerateDataClicked" />
+                        <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Export Package" Style="{StaticResource GreenButton}" Clicked="OnGenerateDataClicked" />
                     </Grid>
                     <Grid Grid.Row="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">
                         <Button x:Name="IncrementDataButton" Grid.Column="0" Text="Increment" Style="{StaticResource GreenButton}" Clicked="OnIncrementDataClicked" />
@@ -52,7 +52,7 @@
 
             <Grid Grid.Row="2" ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
                 <VerticalStackLayout Spacing="2"><Label Text="FLASH AREA" Style="{StaticResource PanelTitle}" /><Label x:Name="CardCountLabel" Text="0 cards on hand" TextColor="{StaticResource Secondary}" /></VerticalStackLayout>
-                <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center"><Label Text="Shuffle" VerticalOptions="Center" /><Switch x:Name="ShuffleSwitch" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" Toggled="OnShuffleToggled" /></HorizontalStackLayout>
+                <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center"><Label Text="Shuffle" VerticalOptions="Center" /><Switch x:Name="ShuffleSwitch" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" Toggled="OnShuffleToggled" /><Label Text="Keyboard" VerticalOptions="Center" /><Switch x:Name="KeyboardSwitch" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" Toggled="OnKeyboardToggled" /></HorizontalStackLayout>
                 <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" HorizontalOptions="End" VerticalOptions="Center" />
             </Grid>
 
@@ -66,17 +66,17 @@
                         <Button x:Name="ZoomOutButton" Grid.Row="1" Grid.Column="1" Text="Zoom Out" Padding="4,8" FontSize="12" Clicked="OnZoomOutClicked" />
                     </Grid>
                     <Grid Grid.Row="1" ColumnDefinitions="56,*,56">
-                        <Button x:Name="PreviousButton" Grid.Column="0" Grid.ZIndex="1" Text="‹" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnPreviousClicked" />
-                        <Image x:Name="FlashImage" Grid.Column="1" Grid.ZIndex="0" Source="dotnet_bot.png" Aspect="AspectFit">
+                        <Button x:Name="PreviousButton" Grid.Column="0" ZIndex="1" Text="‹" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnPreviousClicked" />
+                        <Image x:Name="FlashImage" Grid.Column="1" ZIndex="0" Source="dotnet_bot.png" Aspect="AspectFit">
                             <Image.GestureRecognizers><TapGestureRecognizer Tapped="OnFlashImageTapped" /></Image.GestureRecognizers>
                         </Image>
-                        <Button x:Name="NextButton" Grid.Column="2" Grid.ZIndex="1" Text="›" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnNextClicked" />
+                        <Button x:Name="NextButton" Grid.Column="2" ZIndex="1" Text="›" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnNextClicked" />
                     </Grid>
                     <Label x:Name="CardNameLabel" Grid.Row="2" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Grid Grid.Row="3" ColumnDefinitions="*,*,*" ColumnSpacing="4" MaximumWidthRequest="360" HorizontalOptions="Center">
-                        <Button x:Name="RollButton" Grid.Column="0" Text="↻ Roll" WidthRequest="{OnPlatform Android=-1, Default=80}" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnRollClicked" />
-                        <Button x:Name="FlashButton" Grid.Column="1" Text="Flash" WidthRequest="{OnPlatform Android=-1, Default=80}" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashClicked" />
-                        <Button x:Name="FlashAllButton" Grid.Column="2" Text="Flash All" WidthRequest="{OnPlatform Android=-1, Default=80}" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashAllClicked" />
+                    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="4" HorizontalOptions="Center">
+                        <Button x:Name="RollButton" Grid.Column="0" Text="↻ Roll" WidthRequest="80" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnRollClicked" />
+                        <Button x:Name="FlashButton" Grid.Column="1" Text="Flash" WidthRequest="80" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashClicked" />
+                        <Button x:Name="FlashAllButton" Grid.Column="2" Text="Flash All" WidthRequest="80" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashAllClicked" />
                     </Grid>
                 </Grid>
             </Border>
@@ -98,7 +98,7 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsEnabled="False" Clicked="OnLocateClicked" /></Grid>
+            <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsVisible="{OnPlatform Android=False, Default=True}" IsEnabled="False" Clicked="OnLocateClicked" /><Button x:Name="CopyPathButton" Grid.Column="3" Text="Copy Path" IsVisible="{OnPlatform Android=True, Default=False}" /></Grid>
             <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
         </Grid>
     </ScrollView>

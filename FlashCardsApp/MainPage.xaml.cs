@@ -1,10 +1,15 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using CommunityToolkit.Maui.Storage;
+#if WINDOWS
+using Microsoft.UI.Xaml.Input;
+using Windows.System;
+#endif
 
 namespace FlashCardsApp;
 
@@ -21,7 +26,12 @@ public partial class MainPage : ContentPage
     private bool _autoRollPaused;
     private double? _autoRollSeconds;
     private bool _shuffleEnabled;
+    private bool _keyboardEnabled;
     private bool _stateLoaded;
+#if WINDOWS
+    private Microsoft.UI.Xaml.FrameworkElement? _windowsNativeView;
+    private KeyEventHandler? _windowsKeyHandler;
+#endif
     private const double NormalFlashAreaHeight = 400;
     private const double MaximizedBottomReserve = 96;
 
@@ -33,6 +43,9 @@ public partial class MainPage : ContentPage
     public MainPage()
     {
         InitializeComponent();
+        HandlerChanged += OnMainPageHandlerChanged;
+        if (FindByName("CopyPathButton") is Button copyPathButton)
+            copyPathButton.Clicked += OnCopyPathClicked;
         BindingContext = this;
         UpdateDiscardActions();
         RefreshFlashArea();
@@ -41,6 +54,7 @@ public partial class MainPage : ContentPage
     protected override async void OnAppearing()
     {
         base.OnAppearing();
+        AttachWindowsKeyboard();
         if (_stateLoaded)
             return;
 
@@ -52,9 +66,82 @@ public partial class MainPage : ContentPage
 
     protected override void OnDisappearing()
     {
+#if WINDOWS
+        DetachWindowsKeyboard();
+#endif
         StopAutoRoll();
         base.OnDisappearing();
     }
+
+    private void AttachWindowsKeyboard()
+    {
+#if WINDOWS
+        if (!_keyboardEnabled || _windowsNativeView is not null || Handler?.PlatformView is not Microsoft.UI.Xaml.FrameworkElement nativeView)
+            return;
+
+        _windowsNativeView = nativeView;
+        _windowsKeyHandler = OnWindowsKeyDown;
+        _windowsNativeView.AddHandler(Microsoft.UI.Xaml.UIElement.PreviewKeyDownEvent, _windowsKeyHandler, true);
+        FlashImage.Focus();
+#endif
+    }
+
+    private void DetachWindowsKeyboard()
+    {
+#if WINDOWS
+        if (_windowsNativeView is not null)
+        {
+            if (_windowsKeyHandler is not null)
+                _windowsNativeView.RemoveHandler(Microsoft.UI.Xaml.UIElement.PreviewKeyDownEvent, _windowsKeyHandler);
+            _windowsNativeView = null;
+            _windowsKeyHandler = null;
+        }
+#endif
+    }
+
+    private void OnMainPageHandlerChanged(object? sender, EventArgs e) => AttachWindowsKeyboard();
+
+#if WINDOWS
+    private void OnWindowsKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!_keyboardEnabled)
+            return;
+
+        if (e.KeyStatus.WasKeyDown)
+            return;
+
+        var direction = e.Key switch
+        {
+            VirtualKey.Left => -1,
+            VirtualKey.Right => 1,
+            _ => 0
+        };
+
+        if (direction != 0)
+        {
+            e.Handled = true;
+            HandleKeyboardNavigation(direction);
+            return;
+        }
+
+        if (e.Key == VirtualKey.Space)
+        {
+            e.Handled = true;
+            HandleKeyboardFlip();
+        }
+
+        else if (e.Key == VirtualKey.F11)
+        {
+            e.Handled = true;
+            HandleKeyboardMaximize();
+        }
+        else if (e.Key == VirtualKey.Escape && _isMaximized)
+        {
+            e.Handled = true;
+            HandleKeyboardMinimize();
+        }
+    }
+#endif
 
     private async void OnAddImageClicked(object? sender, EventArgs e)
     {
@@ -83,7 +170,7 @@ public partial class MainPage : ContentPage
 
     private async void OnLoadDataClicked(object? sender, EventArgs e)
     {
-        var file = await PickFileAsync("Select a flashcard JSON file", ".json");
+        var file = await PickFileAsync("Select a flashcard package or JSON file", ".flashcards");
         if (file is null)
             return;
 
@@ -116,15 +203,18 @@ public partial class MainPage : ContentPage
 
     private async void OnIncrementDataClicked(object? sender, EventArgs e)
     {
-        var file = await PickFileAsync("Select JSON cards to merge", ".json");
+        var file = await PickFileAsync("Select a flashcard package or JSON file", ".flashcards");
         if (file is null)
             return;
 
         await RunBusyAsync(async () =>
         {
             var imported = await ReadCardsAsync(file);
+            var existingNames = Cards
+                .Select(card => card.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
             var newCards = imported
-                .Where(card => !Cards.Any(existing => existing.Name.Equals(card.Name, StringComparison.OrdinalIgnoreCase)))
+                .Where(card => existingNames.Add(card.Name))
                 .ToList();
             if (newCards.Count == 0)
             {
@@ -169,11 +259,18 @@ public partial class MainPage : ContentPage
             if (!generateConfirmed)
                 return;
 
-            var payload = new FlashCardDocument { Cards = Cards.ToList() };
-            var json = JsonSerializer.Serialize(payload, JsonOptions);
-            await using var jsonStream = new MemoryStream(Encoding.UTF8.GetBytes(json));
-            var fileName = $"flashcards-{DateTime.Now:yyyyMMdd-HHmmss}.json";
-            var saveResult = await FileSaver.Default.SaveAsync(fileName, jsonStream);
+            var packagePath = await CreatePackageAsync(Cards);
+            FileSaverResult saveResult;
+            try
+            {
+                await using var packageStream = File.OpenRead(packagePath);
+                var fileName = $"flashcards-{DateTime.Now:yyyyMMdd-HHmmss}.flashcards";
+                saveResult = await FileSaver.Default.SaveAsync(fileName, packageStream);
+            }
+            finally
+            {
+                File.Delete(packagePath);
+            }
 
             if (!saveResult.IsSuccessful)
             {
@@ -186,7 +283,8 @@ public partial class MainPage : ContentPage
 
             _generatedFilePath = saveResult.FilePath;
             GeneratedPathLabel.Text = _generatedFilePath;
-            LocateButton.IsEnabled = !string.IsNullOrWhiteSpace(_generatedFilePath);
+            var hasGeneratedPath = !string.IsNullOrWhiteSpace(_generatedFilePath);
+            LocateButton.IsEnabled = hasGeneratedPath;
             StatusLabel.Text = "JSON exported successfully";
         });
     }
@@ -360,8 +458,38 @@ public partial class MainPage : ContentPage
         StatusLabel.Text = _shuffleEnabled ? "Shuffle enabled" : "Shuffle disabled";
     }
 
+    private void OnKeyboardToggled(object? sender, ToggledEventArgs e)
+    {
+        _keyboardEnabled = e.Value;
+#if WINDOWS
+        if (_keyboardEnabled)
+            AttachWindowsKeyboard();
+        else
+            DetachWindowsKeyboard();
+#endif
+        StatusLabel.Text = _keyboardEnabled ? "Keyboard controls enabled" : "Keyboard controls disabled";
+    }
+
+    internal bool KeyboardShortcutsEnabled => _keyboardEnabled;
+
+    internal void HandleKeyboardFlip() => _ = AnimateFlipAsync();
+
+    internal void HandleKeyboardMaximize() => OnMaximizeClicked(this, EventArgs.Empty);
+
+    internal void HandleKeyboardMinimize()
+    {
+        if (_isMaximized)
+            OnMinimizeClicked(this, EventArgs.Empty);
+    }
+
     private async void OnPreviousClicked(object? sender, EventArgs e) => await NavigateCardAsync(-1);
     private async void OnNextClicked(object? sender, EventArgs e) => await NavigateCardAsync(1);
+
+    internal void HandleKeyboardNavigation(int direction)
+    {
+        if (direction is -1 or 1)
+            _ = NavigateCardAsync(direction);
+    }
 
     private async Task NavigateCardAsync(int direction)
     {
@@ -855,6 +983,22 @@ public partial class MainPage : ContentPage
     private static Task ShareGeneratedFileAsync(string filePath) =>
         Share.Default.RequestAsync(new ShareFileRequest("Generated flashcards", new ShareFile(filePath)));
 
+    private async void OnCopyPathClicked(object sender, EventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_generatedFilePath))
+            return;
+
+        try
+        {
+            await Clipboard.Default.SetTextAsync(_generatedFilePath);
+            StatusLabel.Text = "File path copied to clipboard";
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("Copy path", $"Unable to copy the file path: {ex.Message}", "OK");
+        }
+    }
+
     private void RefreshFlashArea()
     {
         var card = CurrentCard;
@@ -894,6 +1038,7 @@ public partial class MainPage : ContentPage
         try
         {
             var isJson = fileType.Equals(".json", StringComparison.OrdinalIgnoreCase);
+            var isPackage = fileType.Equals(".flashcards", StringComparison.OrdinalIgnoreCase);
             var pickerType = isJson ?
                 new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
                 {
@@ -901,9 +1046,16 @@ public partial class MainPage : ContentPage
                     [DevicePlatform.iOS] = new[] { "public.json" },
                     [DevicePlatform.MacCatalyst] = new[] { "public.json" },
                     [DevicePlatform.WinUI] = new[] { ".json" }
+                }) : isPackage ?
+                new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+                {
+                    [DevicePlatform.Android] = new[] { "application/zip", "application/octet-stream" },
+                    [DevicePlatform.iOS] = new[] { "public.archive" },
+                    [DevicePlatform.MacCatalyst] = new[] { "public.archive" },
+                    [DevicePlatform.WinUI] = new[] { ".flashcards", ".zip" }
                 }) : FilePickerFileType.Images;
             var file = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = title, FileTypes = pickerType });
-            if (!isJson && file is not null && !IsImageFile(file.FileName))
+            if (!isJson && !isPackage && file is not null && !IsImageFile(file.FileName))
             {
                 await DisplayAlert("File selection", "Please select an image file.", "OK");
                 return null;
@@ -928,13 +1080,161 @@ public partial class MainPage : ContentPage
         return path;
     }
 
+    private static async Task<string> CreatePackageAsync(IEnumerable<FlashCard> cards)
+    {
+        var packagePath = Path.Combine(FileSystem.Current.CacheDirectory, $"{Guid.NewGuid():N}.flashcards");
+        var packageCards = new List<FlashCardPackageCard>();
+
+        await using (var packageStream = File.Create(packagePath))
+        using (var archive = new ZipArchive(packageStream, ZipArchiveMode.Create))
+        {
+            var index = 0;
+            foreach (var card in cards)
+            {
+                var frontEntry = $"images/{index}-front{Path.GetExtension(card.FrontImage)}";
+                await AddFileToArchiveAsync(archive, card.FrontImage, frontEntry);
+
+                var backEntry = string.Empty;
+                if (!string.IsNullOrWhiteSpace(card.BackImage))
+                {
+                    backEntry = $"images/{index}-back{Path.GetExtension(card.BackImage)}";
+                    await AddFileToArchiveAsync(archive, card.BackImage, backEntry);
+                }
+
+                packageCards.Add(new FlashCardPackageCard
+                {
+                    Name = card.Name,
+                    FrontImage = frontEntry,
+                    BackImage = backEntry,
+                    BackName = card.BackName
+                });
+                index++;
+            }
+
+            var manifest = new FlashCardPackageDocument { Cards = packageCards };
+            var manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
+            await using var manifestStream = manifestEntry.Open();
+            await JsonSerializer.SerializeAsync(manifestStream, manifest, JsonOptions);
+        }
+
+        return packagePath;
+    }
+
+    private static async Task AddFileToArchiveAsync(ZipArchive archive, string filePath, string entryName)
+    {
+        var entry = archive.CreateEntry(entryName, CompressionLevel.Fastest);
+        await using var source = File.OpenRead(filePath);
+        await using var destination = entry.Open();
+        await source.CopyToAsync(destination);
+    }
+
     private static async Task<List<FlashCard>> ReadCardsAsync(FileResult file)
     {
+        if (IsPackageFile(file.FileName))
+            return await ReadPackageCardsAsync(file);
+
         await using var stream = await file.OpenReadAsync();
         var document = await JsonSerializer.DeserializeAsync<FlashCardDocument>(stream, JsonOptions);
-        var cards = document?.Cards ?? new List<FlashCard>();
+        var cards = new List<FlashCard>();
+        foreach (var transferCard in document?.Cards ?? new List<FlashCardTransfer>())
+        {
+            cards.Add(new FlashCard
+            {
+                Name = transferCard.Name,
+                FrontImage = await MaterializeImageAsync(transferCard.FrontImageData, transferCard.FrontImage),
+                BackImage = await MaterializeImageAsync(transferCard.BackImageData, transferCard.BackImage),
+                BackName = transferCard.BackName
+            });
+        }
+
         ValidateCards(cards);
         return cards;
+    }
+
+    private static async Task<List<FlashCard>> ReadPackageCardsAsync(FileResult file)
+    {
+        var temporaryPath = Path.Combine(FileSystem.Current.CacheDirectory, $"{Guid.NewGuid():N}.flashcards");
+        try
+        {
+            await using (var source = await file.OpenReadAsync())
+            await using (var destination = File.Create(temporaryPath))
+                await source.CopyToAsync(destination);
+
+            using var archive = ZipFile.OpenRead(temporaryPath);
+            var manifestEntry = archive.GetEntry("manifest.json")
+                ?? throw new InvalidDataException("The flashcard package does not contain a manifest.");
+
+            await using var manifestStream = manifestEntry.Open();
+            var manifest = await JsonSerializer.DeserializeAsync<FlashCardPackageDocument>(manifestStream, JsonOptions)
+                ?? throw new InvalidDataException("The flashcard package manifest is invalid.");
+
+            var cards = new List<FlashCard>();
+            foreach (var packageCard in manifest.Cards)
+            {
+                cards.Add(new FlashCard
+                {
+                    Name = packageCard.Name,
+                    FrontImage = await ExtractImageAsync(archive, packageCard.FrontImage),
+                    BackImage = await ExtractImageAsync(archive, packageCard.BackImage),
+                    BackName = packageCard.BackName
+                });
+            }
+
+            ValidateCards(cards);
+            return cards;
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    private static async Task<string> ExtractImageAsync(ZipArchive archive, string entryName)
+    {
+        if (string.IsNullOrWhiteSpace(entryName))
+            return string.Empty;
+
+        if (Path.IsPathRooted(entryName) || entryName.Contains("..", StringComparison.Ordinal))
+            throw new InvalidDataException("The flashcard package contains an invalid image path.");
+
+        var entry = archive.GetEntry(entryName)
+            ?? throw new InvalidDataException($"The flashcard package is missing image '{entryName}'.");
+        var extension = Path.GetExtension(entryName);
+        var imagePath = Path.Combine(FileSystem.Current.AppDataDirectory, $"{Guid.NewGuid():N}{extension}");
+
+        await using var source = entry.Open();
+        await using var destination = File.Create(imagePath);
+        await source.CopyToAsync(destination);
+        return imagePath;
+    }
+
+    private static bool IsPackageFile(string fileName) =>
+        string.Equals(Path.GetExtension(fileName), ".flashcards", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(Path.GetExtension(fileName), ".zip", StringComparison.OrdinalIgnoreCase);
+
+    private static async Task<string> MaterializeImageAsync(string imageData, string originalPath)
+    {
+        if (string.IsNullOrWhiteSpace(imageData))
+            return originalPath;
+
+        byte[] imageBytes;
+        try
+        {
+            imageBytes = Convert.FromBase64String(imageData);
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidDataException("The JSON contains invalid image data.", ex);
+        }
+
+        var extension = Path.GetExtension(originalPath);
+        if (string.IsNullOrWhiteSpace(extension))
+            extension = ".img";
+
+        var imagePath = Path.Combine(FileSystem.Current.AppDataDirectory, $"{Guid.NewGuid():N}{extension}");
+        await File.WriteAllBytesAsync(imagePath, imageBytes);
+        return imagePath;
     }
 
     private async Task RunBusyAsync(Func<Task> action)
@@ -1053,7 +1353,49 @@ public sealed class FlashCard
 public sealed class FlashCardDocument
 {
     [JsonPropertyName("cards")]
-    public List<FlashCard> Cards { get; set; } = new();
+    public List<FlashCardTransfer> Cards { get; set; } = new();
+}
+
+public sealed class FlashCardPackageDocument
+{
+    [JsonPropertyName("cards")]
+    public List<FlashCardPackageCard> Cards { get; set; } = new();
+}
+
+public sealed class FlashCardPackageCard
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("frontImage")]
+    public string FrontImage { get; set; } = string.Empty;
+
+    [JsonPropertyName("backImage")]
+    public string BackImage { get; set; } = string.Empty;
+
+    [JsonPropertyName("backName")]
+    public string BackName { get; set; } = string.Empty;
+}
+
+public sealed class FlashCardTransfer
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("frontImage")]
+    public string FrontImage { get; set; } = string.Empty;
+
+    [JsonPropertyName("frontImageData")]
+    public string FrontImageData { get; set; } = string.Empty;
+
+    [JsonPropertyName("backImage")]
+    public string BackImage { get; set; } = string.Empty;
+
+    [JsonPropertyName("backImageData")]
+    public string BackImageData { get; set; } = string.Empty;
+
+    [JsonPropertyName("backName")]
+    public string BackName { get; set; } = string.Empty;
 }
 
 internal sealed class FlashCardsState
