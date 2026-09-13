@@ -21,9 +21,9 @@
         </Style>
     </ContentPage.Resources>
 
-    <ScrollView x:Name="PageScroll" SizeChanged="OnPageScrollSizeChanged">
+    <ScrollView x:Name="PageScroll" VerticalScrollBarVisibility="Default" SizeChanged="OnPageScrollSizeChanged">
         <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,400,Auto,Auto,Auto">
-            <Border Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+            <Border x:Name="TopControlPanel" Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                     <Label Text="TOP CONTROL PANEL" Style="{StaticResource PanelTitle}" />
                     <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
@@ -34,7 +34,7 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="1" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+            <Border x:Name="DataManagementPanel" Grid.Row="1" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
                     <Label Text="DATA MANAGEMENT" Style="{StaticResource PanelTitle}" />
                     <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
@@ -50,14 +50,14 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="2" ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+            <Grid x:Name="FlashAreaHeader" Grid.Row="2" ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
                 <VerticalStackLayout Spacing="2"><Label Text="FLASH AREA" Style="{StaticResource PanelTitle}" /><Label x:Name="CardCountLabel" Text="0 cards on hand" TextColor="{StaticResource Secondary}" /></VerticalStackLayout>
                 <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center"><Label Text="Shuffle" VerticalOptions="Center" /><Switch x:Name="ShuffleSwitch" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" Toggled="OnShuffleToggled" /><Label Text="Keyboard" VerticalOptions="Center" /><Switch x:Name="KeyboardSwitch" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" Toggled="OnKeyboardToggled" /></HorizontalStackLayout>
                 <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" HorizontalOptions="End" VerticalOptions="Center" />
             </Grid>
 
             <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="10" MinimumHeightRequest="400" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
-                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="8">
+                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="5">
                     <Grid Grid.Row="0" ZIndex="2" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
                         <Button x:Name="MaximizeButton" Grid.Row="0" Grid.Column="0" Text="Maximize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMaximizeClicked" />
                         <Button x:Name="MinimizeButton" Grid.Row="0" Grid.Column="0" Text="Minimize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" IsVisible="False" Clicked="OnMinimizeClicked" />
@@ -81,7 +81,7 @@
                 </Grid>
             </Border>
 
-            <Border Grid.Row="4" Padding="10" Stroke="{StaticResource Gray600}" StrokeThickness="2" StrokeShape="RoundRectangle 12">
+            <Border x:Name="DiscardSection" Grid.Row="4" Padding="10" Stroke="{StaticResource Gray600}" StrokeThickness="2" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,*" RowSpacing="6">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                         <VerticalStackLayout Spacing="0" VerticalOptions="Center">
@@ -98,7 +98,7 @@
                 </Grid>
             </Border>
 
-            <Grid Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsVisible="{OnPlatform Android=False, Default=True}" IsEnabled="False" Clicked="OnLocateClicked" /><Button x:Name="CopyPathButton" Grid.Column="3" Text="Copy Path" IsVisible="{OnPlatform Android=True, Default=False}" /></Grid>
+            <Grid x:Name="GeneratedFileRow" Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsVisible="{OnPlatform Android=False, Default=True}" IsEnabled="False" Clicked="OnLocateClicked" /><Button x:Name="CopyPathButton" Grid.Column="3" Text="Copy Path" IsVisible="{OnPlatform Android=True, Default=False}" /></Grid>
             <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
         </Grid>
     </ScrollView>

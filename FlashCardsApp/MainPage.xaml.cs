@@ -33,7 +33,13 @@ public partial class MainPage : ContentPage
     private KeyEventHandler? _windowsKeyHandler;
 #endif
     private const double NormalFlashAreaHeight = 400;
+#if ANDROID
     private const double MaximizedBottomReserve = 96;
+    private const double MaximizedScrollExtension = 0;
+#else
+    private const double MaximizedBottomReserve = 96;
+    private const double MaximizedScrollExtension = 0;
+#endif
 
     private static string SavedStatePath => Path.Combine(FileSystem.Current.AppDataDirectory, "flashcards-state.json");
 
@@ -518,6 +524,7 @@ public partial class MainPage : ContentPage
         _imageScale = scale;
         FlashImage.Scale = scale;
         ResetZoomButton.IsEnabled = Math.Abs(scale - 1) > .001;
+        UpdateAutoRollActions();
     }
 
     private async void OnRollClicked(object? sender, EventArgs e)
@@ -576,9 +583,10 @@ public partial class MainPage : ContentPage
             _currentCard = card;
             RefreshFlashArea();
             await Task.Delay(120);
-            DiscardedCards.Insert(0, card);
+            DiscardedCards.Add(card);
         }
 
+        ScrollDiscardCollectionToEnd();
         _currentCard = Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
@@ -592,7 +600,10 @@ public partial class MainPage : ContentPage
             return;
 
         if (!DiscardedCards.Contains(CurrentCard))
-            DiscardedCards.Insert(0, CurrentCard);
+        {
+            DiscardedCards.Add(CurrentCard);
+            ScrollDiscardCollectionToEnd();
+        }
 
         await SaveStateAsync();
 
@@ -813,6 +824,9 @@ public partial class MainPage : ContentPage
         PauseButton.BackgroundColor = isRunning ? green : gray;
         MaximizeButton.BackgroundColor = green;
         MinimizeButton.BackgroundColor = green;
+        ResetZoomButton.BackgroundColor = ResetZoomButton.IsEnabled && !isRunning ? green : gray;
+        SelectAllButton.BackgroundColor = SelectAllButton.IsEnabled && !isRunning ? green : gray;
+        ReturnButton.BackgroundColor = ReturnButton.IsEnabled && !isRunning ? green : gray;
         DeleteButton.BackgroundColor = isRunning
             ? gray
             : hasDiscardedCards
@@ -831,8 +845,18 @@ public partial class MainPage : ContentPage
 
     private void OnSelectAllClicked(object? sender, EventArgs e)
     {
-        DiscardCollection.SelectedItems = new ObservableCollection<object>(DiscardedCards.Cast<object>());
+        var allSelected = DiscardedCards.Count > 0 &&
+                          DiscardCollection.SelectedItems?.Count == DiscardedCards.Count;
+        DiscardCollection.SelectedItems = allSelected
+            ? new ObservableCollection<object>()
+            : new ObservableCollection<object>(DiscardedCards.Cast<object>());
         UpdateDiscardActions();
+    }
+
+    private void ScrollDiscardCollectionToEnd()
+    {
+        if (DiscardedCards.Count > 0)
+            DiscardCollection.ScrollTo(DiscardedCards.Count - 1, position: ScrollToPosition.End, animate: true);
     }
 
     private void UpdateDiscardActions()
@@ -916,9 +940,17 @@ public partial class MainPage : ContentPage
     {
         _isMaximized = false;
         Workspace.HeightRequest = -1;
+        Grid.SetRow(FlashCardBorder, 3);
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
             Workspace.RowDefinitions[i].Height = i == 3 ? new GridLength(NormalFlashAreaHeight) : GridLength.Auto;
 
+        Workspace.Padding = new Thickness(12);
+        TopControlPanel.IsVisible = true;
+        DataManagementPanel.IsVisible = true;
+        FlashAreaHeader.IsVisible = true;
+        DiscardSection.IsVisible = true;
+        GeneratedFileRow.IsVisible = true;
+        PageScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Default;
         MaximizeButton.IsVisible = true;
         MinimizeButton.IsVisible = false;
         Workspace.InvalidateMeasure();
@@ -932,10 +964,23 @@ public partial class MainPage : ContentPage
             NormalFlashAreaHeight);
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
             Workspace.RowDefinitions[i].Height = _isMaximized && i != 3 ? new GridLength(0) : GridLength.Auto;
-        Workspace.HeightRequest = _isMaximized ? flashAreaHeight : -1;
-        Workspace.RowDefinitions[3].Height = _isMaximized ? new GridLength(flashAreaHeight) : new GridLength(NormalFlashAreaHeight);
+        Workspace.Padding = _isMaximized ? new Thickness(12, 0, 12, 12) : new Thickness(12);
+        var maximizedHeight = flashAreaHeight + MaximizedScrollExtension;
+        Workspace.HeightRequest = _isMaximized ? maximizedHeight : -1;
+        Grid.SetRow(FlashCardBorder, _isMaximized ? 0 : 3);
+        Workspace.RowDefinitions[0].Height = _isMaximized ? new GridLength(maximizedHeight) : GridLength.Auto;
+        Workspace.RowDefinitions[3].Height = _isMaximized ? new GridLength(0) : new GridLength(NormalFlashAreaHeight);
+        TopControlPanel.IsVisible = !_isMaximized;
+        DataManagementPanel.IsVisible = !_isMaximized;
+        FlashAreaHeader.IsVisible = !_isMaximized;
+        DiscardSection.IsVisible = !_isMaximized;
+        GeneratedFileRow.IsVisible = !_isMaximized;
+        PageScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Default;
         MaximizeButton.IsVisible = !_isMaximized;
         MinimizeButton.IsVisible = _isMaximized;
+        Workspace.InvalidateMeasure();
+        if (_isMaximized)
+            _ = PageScroll.ScrollToAsync(0, 0, false);
     }
 
     private async void OnLocateClicked(object? sender, EventArgs e)
