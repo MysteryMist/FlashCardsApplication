@@ -28,11 +28,17 @@ public partial class MainPage : ContentPage
     private bool _shuffleEnabled;
     private bool _keyboardEnabled;
     private bool _stateLoaded;
+    private double _panStartTranslationX;
+    private double _panStartTranslationY;
+    private double _pinchStartScale = 1;
+    private CancellationTokenSource? _wheelResetCancellation;
 #if WINDOWS
     private Microsoft.UI.Xaml.FrameworkElement? _windowsNativeView;
     private KeyEventHandler? _windowsKeyHandler;
+    private Microsoft.UI.Xaml.FrameworkElement? _windowsImageView;
+    private PointerEventHandler? _windowsPointerWheelHandler;
 #endif
-    private const double NormalFlashAreaHeight = 400;
+    private const double NormalFlashAreaHeight = 560;
 #if ANDROID
     private const double MaximizedBottomReserve = 96;
     private const double MaximizedScrollExtension = 0;
@@ -53,6 +59,7 @@ public partial class MainPage : ContentPage
         if (FindByName("CopyPathButton") is Button copyPathButton)
             copyPathButton.Clicked += OnCopyPathClicked;
         BindingContext = this;
+        ApplyImageLayout();
         UpdateDiscardActions();
         RefreshFlashArea();
     }
@@ -61,6 +68,7 @@ public partial class MainPage : ContentPage
     {
         base.OnAppearing();
         AttachWindowsKeyboard();
+        AttachWindowsPointerWheel();
         if (_stateLoaded)
             return;
 
@@ -74,7 +82,9 @@ public partial class MainPage : ContentPage
     {
 #if WINDOWS
         DetachWindowsKeyboard();
+        DetachWindowsPointerWheel();
 #endif
+        _wheelResetCancellation?.Cancel();
         StopAutoRoll();
         base.OnDisappearing();
     }
@@ -105,7 +115,44 @@ public partial class MainPage : ContentPage
 #endif
     }
 
-    private void OnMainPageHandlerChanged(object? sender, EventArgs e) => AttachWindowsKeyboard();
+    private void OnMainPageHandlerChanged(object? sender, EventArgs e)
+    {
+        AttachWindowsKeyboard();
+        AttachWindowsPointerWheel();
+    }
+
+    private void ApplyImageLayout()
+    {
+        var isDesktop = DeviceInfo.Current.Platform == DevicePlatform.WinUI || DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst;
+        var useExpandedLayout = _isMaximized;
+        FlashImageFrame.HorizontalOptions = LayoutOptions.Center;
+        FlashImageFrame.VerticalOptions = LayoutOptions.Center;
+        FlashImage.WidthRequest = isDesktop ? (useExpandedLayout ? 520 : 420) : -1;
+        FlashImage.HeightRequest = isDesktop ? (useExpandedLayout ? 390 : 320) : -1;
+    }
+
+    private void AttachWindowsPointerWheel()
+    {
+#if WINDOWS
+        if (_windowsImageView is not null || FlashImage.Handler?.PlatformView is not Microsoft.UI.Xaml.FrameworkElement imageView)
+            return;
+
+        _windowsImageView = imageView;
+        _windowsPointerWheelHandler = OnWindowsPointerWheelChanged;
+        _windowsImageView.PointerWheelChanged += _windowsPointerWheelHandler;
+#endif
+    }
+
+    private void DetachWindowsPointerWheel()
+    {
+#if WINDOWS
+        if (_windowsImageView is not null && _windowsPointerWheelHandler is not null)
+            _windowsImageView.PointerWheelChanged -= _windowsPointerWheelHandler;
+
+        _windowsImageView = null;
+        _windowsPointerWheelHandler = null;
+#endif
+    }
 
 #if WINDOWS
     private void OnWindowsKeyDown(object sender, KeyRoutedEventArgs e)
@@ -171,6 +218,7 @@ public partial class MainPage : ContentPage
         _showingBack = false;
         RefreshFlashArea();
         await SaveStateAsync();
+        await JiggleImageAsync();
         StatusLabel.Text = string.IsNullOrWhiteSpace(draft.BackPath) ? "Added (no back image)" : "Card added";
     }
 
@@ -454,6 +502,92 @@ public partial class MainPage : ContentPage
         await AnimateFlipAsync();
     }
 
+    private void OnFlashImagePanUpdated(object? sender, PanUpdatedEventArgs e)
+    {
+        switch (e.StatusType)
+        {
+            case GestureStatus.Started:
+                _panStartTranslationX = FlashImageFrame.TranslationX;
+                _panStartTranslationY = FlashImageFrame.TranslationY;
+                break;
+            case GestureStatus.Running:
+                FlashImageFrame.TranslationX = _panStartTranslationX + e.TotalX;
+                FlashImageFrame.TranslationY = _panStartTranslationY + e.TotalY;
+                break;
+            case GestureStatus.Completed:
+            case GestureStatus.Canceled:
+                _ = FlashImageFrame.TranslateTo(0, 0, 250, Easing.SinOut);
+                break;
+        }
+    }
+
+    private void OnFlashImagePinchUpdated(object? sender, PinchGestureUpdatedEventArgs e)
+    {
+        switch (e.Status)
+        {
+            case GestureStatus.Started:
+                _pinchStartScale = FlashImageFrame.Scale;
+                break;
+            case GestureStatus.Running:
+                SetZoom(Math.Clamp(_pinchStartScale * e.Scale, .6, 2));
+                break;
+            case GestureStatus.Completed:
+            case GestureStatus.Canceled:
+                _ = AnimateGestureScaleBackAsync();
+                break;
+        }
+    }
+
+#if WINDOWS
+    private void OnWindowsPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (!e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control))
+            return;
+
+        var delta = e.GetCurrentPoint(null).Properties.MouseWheelDelta;
+        if (delta == 0)
+            return;
+
+        e.Handled = true;
+        SetZoom(Math.Clamp(_imageScale + (delta > 0 ? .1 : -.1), .6, 2));
+        _wheelResetCancellation?.Cancel();
+        _wheelResetCancellation = new CancellationTokenSource();
+        _ = ResetWheelZoomAsync(_wheelResetCancellation.Token);
+    }
+
+    private async Task ResetWheelZoomAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(350, cancellationToken);
+            await AnimateGestureScaleBackAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+#endif
+
+    private async Task AnimateGestureScaleBackAsync()
+    {
+        await FlashImageFrame.ScaleTo(1, 250, Easing.SinInOut);
+        SetZoom(1);
+    }
+
+    private Task JiggleImageAsync()
+    {
+        var completion = new TaskCompletionSource<bool>();
+        var animation = new Animation();
+        animation.Add(0, .25, new Animation(value => FlashImageFrame.Scale = value, 1, 1.08, Easing.SinInOut));
+        animation.Add(.25, .5, new Animation(value => FlashImageFrame.Scale = value, 1.08, 1, Easing.SinInOut));
+        animation.Add(0, .25, new Animation(value => FlashImageFrame.Rotation = value, 0, 4, Easing.SinInOut));
+        animation.Add(.25, .5, new Animation(value => FlashImageFrame.Rotation = value, 4, -4, Easing.SinInOut));
+        animation.Add(.5, .75, new Animation(value => FlashImageFrame.Rotation = value, -4, 2, Easing.SinInOut));
+        animation.Add(.75, 1, new Animation(value => FlashImageFrame.Rotation = value, 2, 0, Easing.SinInOut));
+        animation.Commit(FlashImageFrame, "ImageJiggle", 16, 500, Easing.SinInOut, (_, finished) => completion.TrySetResult(finished));
+        return completion.Task;
+    }
+
     private void OnZoomInClicked(object? sender, EventArgs e) => SetZoom(Math.Min(_imageScale + .1, 2));
     private void OnZoomOutClicked(object? sender, EventArgs e) => SetZoom(Math.Max(_imageScale - .1, .6));
     private void OnResetZoomClicked(object? sender, EventArgs e) => SetZoom(1);
@@ -522,7 +656,7 @@ public partial class MainPage : ContentPage
     private void SetZoom(double scale)
     {
         _imageScale = scale;
-        FlashImage.Scale = scale;
+        FlashImageFrame.Scale = scale;
         ResetZoomButton.IsEnabled = Math.Abs(scale - 1) > .001;
         UpdateAutoRollActions();
     }
@@ -627,20 +761,39 @@ public partial class MainPage : ContentPage
         if (CurrentCard is null)
             return;
 
-        var angle = _showingBack ? -90 : 90;
-        await FlashImage.RotateYTo(angle, 180, Easing.CubicInOut);
+        var angle = _showingBack ? -180 : 180;
+        await AnimateFlipHalfAsync(0, angle, true);
         _showingBack = !_showingBack;
         RefreshFlashArea();
-        await FlashImage.RotateYTo(0, 180, Easing.CubicInOut);
+        await AnimateFlipHalfAsync(angle, angle * 2, false);
+        FlashImageFrame.RotationY = 0;
     }
 
     private async Task AnimateCardChangeAsync(FlashCard card)
     {
-        await FlashImage.RotateYTo(90, 180, Easing.CubicInOut);
+        await AnimateFlipHalfAsync(0, 180, true);
         _currentCard = card;
         _showingBack = false;
         RefreshFlashArea();
-        await FlashImage.RotateYTo(0, 180, Easing.CubicInOut);
+        await AnimateFlipHalfAsync(180, 360, false);
+        FlashImageFrame.RotationY = 0;
+    }
+
+    private Task AnimateFlipHalfAsync(double startAngle, double endAngle, bool narrow)
+    {
+        var completion = new TaskCompletionSource<bool>();
+        var animation = new Animation(value =>
+        {
+            FlashImageFrame.RotationY = startAngle + (endAngle - startAngle) * value;
+            FlashImageFrame.ScaleX = narrow ? 1 - (.96 * value) : .04 + (.96 * value);
+        }, 0, 1, Easing.SinInOut);
+        animation.Commit(FlashImageFrame, "FlashCardFlip", 16, 220, Easing.SinInOut, (_, finished) =>
+        {
+            if (finished && !narrow)
+                FlashImageFrame.ScaleX = 1;
+            completion.TrySetResult(finished);
+        });
+        return completion.Task;
     }
 
     private async Task RollToRandomCardAsync()
@@ -953,6 +1106,9 @@ public partial class MainPage : ContentPage
         PageScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Default;
         MaximizeButton.IsVisible = true;
         MinimizeButton.IsVisible = false;
+        ApplyImageLayout();
+        FlashImageFrame.TranslationX = 0;
+        FlashImageFrame.TranslationY = 0;
         Workspace.InvalidateMeasure();
         await PageScroll.ScrollToAsync(0, 0, false);
     }
@@ -978,6 +1134,7 @@ public partial class MainPage : ContentPage
         PageScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Default;
         MaximizeButton.IsVisible = !_isMaximized;
         MinimizeButton.IsVisible = _isMaximized;
+        ApplyImageLayout();
         Workspace.InvalidateMeasure();
         if (_isMaximized)
             _ = PageScroll.ScrollToAsync(0, 0, false);
@@ -1060,7 +1217,7 @@ public partial class MainPage : ContentPage
         FlashCardBorder.Stroke = hasBack ? (Color)Application.Current!.Resources["Primary"] : Colors.Red;
         CardNameLabel.Text = _showingBack ? $"{GetBackName(card)} (back)" : card.Name;
         FlashImage.Source = _showingBack && hasBack ? card.BackImage : card.FrontImage;
-        FlashImage.Scale = _imageScale;
+        FlashImageFrame.Scale = _imageScale;
         UpdateDiscardActions();
     }
 

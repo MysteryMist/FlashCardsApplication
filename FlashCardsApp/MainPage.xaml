@@ -22,7 +22,7 @@
     </ContentPage.Resources>
 
     <ScrollView x:Name="PageScroll" VerticalScrollBarVisibility="Default" SizeChanged="OnPageScrollSizeChanged">
-        <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,400,Auto,Auto,Auto">
+        <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto">
             <Border x:Name="TopControlPanel" Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                     <Label Text="TOP CONTROL PANEL" Style="{StaticResource PanelTitle}" />
@@ -56,7 +56,7 @@
                 <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" HorizontalOptions="End" VerticalOptions="Center" />
             </Grid>
 
-            <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="10" MinimumHeightRequest="400" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
+            <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="10" MinimumHeightRequest="560" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
                 <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="5">
                     <Grid Grid.Row="0" ZIndex="2" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
                         <Button x:Name="MaximizeButton" Grid.Row="0" Grid.Column="0" Text="Maximize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMaximizeClicked" />
@@ -67,9 +67,15 @@
                     </Grid>
                     <Grid Grid.Row="1" ColumnDefinitions="56,*,56">
                         <Button x:Name="PreviousButton" Grid.Column="0" ZIndex="1" Text="‹" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnPreviousClicked" />
-                        <Image x:Name="FlashImage" Grid.Column="1" ZIndex="0" Source="dotnet_bot.png" Aspect="AspectFit">
-                            <Image.GestureRecognizers><TapGestureRecognizer Tapped="OnFlashImageTapped" /></Image.GestureRecognizers>
-                        </Image>
+                        <Border x:Name="FlashImageFrame" Grid.Column="1" ZIndex="0" Stroke="Black" StrokeThickness="2" StrokeShape="RoundRectangle 8" HorizontalOptions="Center" VerticalOptions="Center">
+                            <Image x:Name="FlashImage" Source="dotnet_bot.png" Aspect="AspectFit" HorizontalOptions="Fill" VerticalOptions="Fill">
+                                <Image.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnFlashImageTapped" />
+                                    <PanGestureRecognizer PanUpdated="OnFlashImagePanUpdated" />
+                                    <PinchGestureRecognizer PinchUpdated="OnFlashImagePinchUpdated" />
+                                </Image.GestureRecognizers>
+                            </Image>
+                        </Border>
                         <Button x:Name="NextButton" Grid.Column="2" ZIndex="1" Text="›" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnNextClicked" />
                     </Grid>
                     <Label x:Name="CardNameLabel" Grid.Row="2" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" />
@@ -99,6 +105,7 @@
             </Border>
 
             <Grid x:Name="GeneratedFileRow" Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsVisible="{OnPlatform Android=False, Default=True}" IsEnabled="False" Clicked="OnLocateClicked" /><Button x:Name="CopyPathButton" Grid.Column="3" Text="Copy Path" IsVisible="{OnPlatform Android=True, Default=False}" /></Grid>
+            <Label Grid.Row="6" Text="Developed by:&#xA;ゲロバショ・ジョン・ヴィンセント・シー" TextColor="{StaticResource Gray300}" HorizontalTextAlignment="Center" HorizontalOptions="Center" Margin="0,8,0,0" />
             <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
         </Grid>
     </ScrollView>
