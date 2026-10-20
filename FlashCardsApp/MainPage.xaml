@@ -21,8 +21,32 @@
         </Style>
     </ContentPage.Resources>
 
-    <ScrollView x:Name="PageScroll" VerticalScrollBarVisibility="Default" SizeChanged="OnPageScrollSizeChanged">
-        <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto">
+    <Grid x:Name="RootLayout" RowDefinitions="Auto,Auto,Auto,*">
+        <Grid x:Name="AndroidMaximizedFlashAreaHeader" Grid.Row="1" IsVisible="False" Padding="12,4,12,4" ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
+            <VerticalStackLayout Spacing="2">
+                <Label Text="FLASH AREA" Style="{StaticResource PanelTitle}" />
+                <Label Text="{Binding Source={x:Reference CardCountLabel}, Path=Text}" TextColor="{StaticResource Secondary}" />
+            </VerticalStackLayout>
+            <HorizontalStackLayout Grid.Column="1" Spacing="6" VerticalOptions="Center">
+                <Label Text="Shuffle" VerticalOptions="Center" />
+                <Switch IsToggled="{Binding Source={x:Reference ShuffleSwitch}, Path=IsToggled, Mode=TwoWay}" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" />
+                <Label Text="Keyboard" VerticalOptions="Center" />
+                <Switch IsToggled="{Binding Source={x:Reference KeyboardSwitch}, Path=IsToggled, Mode=TwoWay}" OnColor="{StaticResource Primary}" ThumbColor="{StaticResource White}" />
+            </HorizontalStackLayout>
+            <Label Grid.Column="2" Text="{Binding Source={x:Reference StatusLabel}, Path=Text}" TextColor="{StaticResource Secondary}" HorizontalOptions="End" VerticalOptions="Center" />
+        </Grid>
+
+        <Border x:Name="AndroidMaximizedImageControlsBorder" Grid.Row="2" IsVisible="False" Margin="12,0,12,4" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+            <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="4">
+                <Button x:Name="AndroidMaximizedMinimizeButton" Grid.Column="0" Text="Minimize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMinimizeClicked" />
+                <Button x:Name="AndroidMaximizedResetZoomButton" Grid.Column="1" Text="Reset" Padding="4,8" FontSize="12" IsEnabled="False" Clicked="OnResetZoomClicked" />
+                <Button x:Name="AndroidMaximizedZoomInButton" Grid.Column="2" Text="Zoom In" Padding="4,8" FontSize="12" Clicked="OnZoomInClicked" />
+                <Button x:Name="AndroidMaximizedZoomOutButton" Grid.Column="3" Text="Zoom Out" Padding="4,8" FontSize="12" Clicked="OnZoomOutClicked" />
+            </Grid>
+        </Border>
+
+        <ScrollView x:Name="PageScroll" Grid.Row="3" VerticalScrollBarVisibility="Default" SizeChanged="OnPageScrollSizeChanged">
+            <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto">
             <Border x:Name="TopControlPanel" Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                     <Label Text="TOP CONTROL PANEL" Style="{StaticResource PanelTitle}" />
@@ -37,15 +61,17 @@
             <Border x:Name="DataManagementPanel" Grid.Row="1" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
                     <Label Text="DATA MANAGEMENT" Style="{StaticResource PanelTitle}" />
-                    <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                    <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
                         <Button x:Name="AddImageButton" Grid.Column="0" Text="Add Image" Style="{StaticResource GreenButton}" Clicked="OnAddImageClicked" />
                         <Button x:Name="LoadDataButton" Grid.Column="1" Text="Load Data" Style="{StaticResource GreenButton}" Clicked="OnLoadDataClicked" />
                         <Button x:Name="GenerateDataButton" Grid.Column="2" Text="Export Package" Style="{StaticResource GreenButton}" Clicked="OnGenerateDataClicked" />
+                        <Button x:Name="SaveInAppButton" Grid.Column="3" Text="Save In-App" Style="{StaticResource GreenButton}" Clicked="OnSaveInAppClicked" />
                     </Grid>
-                    <Grid Grid.Row="2" ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                    <Grid Grid.Row="2" ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
                         <Button x:Name="IncrementDataButton" Grid.Column="0" Text="Increment" Style="{StaticResource GreenButton}" Clicked="OnIncrementDataClicked" />
                         <Button x:Name="EditButton" Grid.Column="1" Text="Edit" Style="{StaticResource GreenButton}" Clicked="OnEditClicked" />
                         <Button x:Name="ClearAreaButton" Grid.Column="2" Text="Clear Area" Style="{StaticResource GreenButton}" Clicked="OnClearClicked" />
+                        <Button x:Name="ViewDeckButton" Grid.Column="3" Text="View Deck" Style="{StaticResource GreenButton}" Clicked="OnViewDeckClicked" />
                     </Grid>
                 </Grid>
             </Border>
@@ -58,7 +84,7 @@
 
             <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="10" MinimumHeightRequest="560" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
                 <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="5">
-                    <Grid Grid.Row="0" ZIndex="2" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
+                    <Grid x:Name="FlashCardControls" Grid.Row="0" ZIndex="2" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
                         <Button x:Name="MaximizeButton" Grid.Row="0" Grid.Column="0" Text="Maximize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMaximizeClicked" />
                         <Button x:Name="MinimizeButton" Grid.Row="0" Grid.Column="0" Text="Minimize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" IsVisible="False" Clicked="OnMinimizeClicked" />
                         <Button x:Name="ResetZoomButton" Grid.Row="0" Grid.Column="1" Text="Reset" Padding="4,8" FontSize="12" IsEnabled="False" Clicked="OnResetZoomClicked" />
@@ -105,8 +131,9 @@
             </Border>
 
             <Grid x:Name="GeneratedFileRow" Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsVisible="{OnPlatform Android=False, Default=True}" IsEnabled="False" Clicked="OnLocateClicked" /><Button x:Name="CopyPathButton" Grid.Column="3" Text="Copy Path" IsVisible="{OnPlatform Android=True, Default=False}" /></Grid>
-            <Label Grid.Row="6" Text="Developed by:&#xA;ゲロバショ・ジョン・ヴィンセント・シー" TextColor="{StaticResource Gray300}" HorizontalTextAlignment="Center" HorizontalOptions="Center" Margin="0,8,0,0" />
+                <Label Grid.Row="6" Text="Developed by:&#xA;ゲロヴァショ　ジョン　ヴィンセント　シ" TextColor="{StaticResource Gray300}" HorizontalTextAlignment="Center" HorizontalOptions="Center" Margin="0,8,0,0" />
             <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
-        </Grid>
-    </ScrollView>
+            </Grid>
+        </ScrollView>
+    </Grid>
 </ContentPage>

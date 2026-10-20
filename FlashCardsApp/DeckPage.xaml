@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="FlashCardsApp.DeckPage"
+             Title="View Deck"
+             BackgroundColor="{StaticResource Gray950}">
+    <Grid RowDefinitions="Auto,*" Padding="12" RowSpacing="10">
+        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+            <Button Text="Home" Clicked="OnBackClicked" BackgroundColor="{StaticResource Primary}" />
+            <Label Grid.Column="1" Text="VIEW DECK" FontSize="18" FontAttributes="Bold" VerticalOptions="Center" TextColor="{StaticResource White}" />
+        </Grid>
+        <CollectionView x:Name="DeckCollection" Grid.Row="1" ItemsSource="{Binding Cards}" SelectionMode="None">
+            <CollectionView.EmptyView>
+                <Label Text="No cards loaded" HorizontalOptions="Center" VerticalOptions="Center" TextColor="{StaticResource White}" />
+            </CollectionView.EmptyView>
+            <CollectionView.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="0,0,0,10" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+                        <Border.GestureRecognizers>
+                            <TapGestureRecognizer Tapped="OnCardTapped" CommandParameter="{Binding .}" />
+                        </Border.GestureRecognizers>
+                        <VerticalStackLayout Spacing="8">
+                            <Label Text="{Binding Name}" FontSize="16" FontAttributes="Bold" TextColor="{StaticResource White}" />
+                            <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                <VerticalStackLayout Spacing="4">
+                                    <Label Text="Front" TextColor="{StaticResource Secondary}" />
+                                    <Image Source="{Binding FrontImage}" HeightRequest="150" Aspect="AspectFit" />
+                                </VerticalStackLayout>
+                                <VerticalStackLayout Grid.Column="1" Spacing="4">
+                                    <Label Text="Back" TextColor="{StaticResource Secondary}" />
+                                    <Image Source="{Binding BackImage}" HeightRequest="150" Aspect="AspectFit" />
+                                </VerticalStackLayout>
+                            </Grid>
+                            <Label Text="Tap to show this card on Home" FontSize="12" TextColor="{StaticResource Secondary}" />
+                        </VerticalStackLayout>
+                    </Border>
+                </DataTemplate>
+            </CollectionView.ItemTemplate>
+        </CollectionView>
+    </Grid>
+</ContentPage>

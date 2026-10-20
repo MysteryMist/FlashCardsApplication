@@ -28,10 +28,19 @@ public partial class MainPage : ContentPage
     private bool _shuffleEnabled;
     private bool _keyboardEnabled;
     private bool _stateLoaded;
+    private double _imageAspectRatio = 4d / 3d;
+    private double? _normalImageFrameWidth;
+    private double? _normalImageFrameHeight;
     private double _panStartTranslationX;
     private double _panStartTranslationY;
     private double _pinchStartScale = 1;
     private CancellationTokenSource? _wheelResetCancellation;
+#if ANDROID
+    private CancellationTokenSource? _androidPanHoldCancellation;
+    private bool _androidPanActive;
+    private bool _androidPinchActive;
+    private DateTime _androidSuppressTapUntil;
+#endif
 #if WINDOWS
     private Microsoft.UI.Xaml.FrameworkElement? _windowsNativeView;
     private KeyEventHandler? _windowsKeyHandler;
@@ -39,15 +48,21 @@ public partial class MainPage : ContentPage
     private PointerEventHandler? _windowsPointerWheelHandler;
 #endif
     private const double NormalFlashAreaHeight = 560;
+    private const double AndroidMaximizedFlashAreaHeight = 560;
 #if ANDROID
     private const double MaximizedBottomReserve = 96;
     private const double MaximizedScrollExtension = 0;
+    private const double PanSensitivity = 1.15;
+    private const int AndroidPanHoldDurationMilliseconds = 1500;
 #else
     private const double MaximizedBottomReserve = 96;
     private const double MaximizedScrollExtension = 0;
+    private const double PanSensitivity = 1;
 #endif
 
     private static string SavedStatePath => Path.Combine(FileSystem.Current.AppDataDirectory, "flashcards-state.json");
+    private static string UserDataSetsDirectory => Path.Combine(FileSystem.Current.AppDataDirectory, "DataSets");
+    private static string HiddenBuiltInDataSetsPath => Path.Combine(FileSystem.Current.AppDataDirectory, "hidden-built-in-datasets.json");
 
     public ObservableCollection<FlashCard> Cards { get; } = new();
     public ObservableCollection<FlashCard> DiscardedCards { get; } = new();
@@ -85,6 +100,9 @@ public partial class MainPage : ContentPage
         DetachWindowsPointerWheel();
 #endif
         _wheelResetCancellation?.Cancel();
+#if ANDROID
+        _androidPanHoldCancellation?.Cancel();
+#endif
         StopAutoRoll();
         base.OnDisappearing();
     }
@@ -124,11 +142,30 @@ public partial class MainPage : ContentPage
     private void ApplyImageLayout()
     {
         var isDesktop = DeviceInfo.Current.Platform == DevicePlatform.WinUI || DeviceInfo.Current.Platform == DevicePlatform.MacCatalyst;
-        var useExpandedLayout = _isMaximized;
+        var availableWidth = FlashCardBorder.Width > 0
+            ? Math.Max(200, FlashCardBorder.Width - 132)
+            : 520;
+        var availableHeight = FlashCardBorder.Height > 0
+            ? Math.Max(180, FlashCardBorder.Height - 170)
+            : 390;
+        var normalWidth = _normalImageFrameWidth ?? (isDesktop ? 420 : 300);
+        var normalHeight = _normalImageFrameHeight ?? (isDesktop ? 320 : 225);
+        var maximizedWidth = Math.Min(availableWidth, normalWidth);
+        var maximizedHeight = Math.Min(availableHeight, normalHeight);
+        var frameWidth = maximizedWidth;
+        var frameHeight = frameWidth / _imageAspectRatio;
+        if (frameHeight > maximizedHeight)
+        {
+            frameHeight = maximizedHeight;
+            frameWidth = frameHeight * _imageAspectRatio;
+        }
+
         FlashImageFrame.HorizontalOptions = LayoutOptions.Center;
         FlashImageFrame.VerticalOptions = LayoutOptions.Center;
-        FlashImage.WidthRequest = isDesktop ? (useExpandedLayout ? 520 : 420) : -1;
-        FlashImage.HeightRequest = isDesktop ? (useExpandedLayout ? 390 : 320) : -1;
+        FlashImageFrame.WidthRequest = _isMaximized ? frameWidth : -1;
+        FlashImageFrame.HeightRequest = _isMaximized ? frameHeight : -1;
+        FlashImage.WidthRequest = _isMaximized ? -1 : isDesktop ? 420 : -1;
+        FlashImage.HeightRequest = _isMaximized ? -1 : isDesktop ? 320 : -1;
     }
 
     private void AttachWindowsPointerWheel()
@@ -198,6 +235,39 @@ public partial class MainPage : ContentPage
 
     private async void OnAddImageClicked(object? sender, EventArgs e)
     {
+        var action = await DisplayActionSheet("Add cards", "Cancel", null, "Add one card", "Add front/back batches");
+        if (action == "Add one card")
+            await AddSingleImageAsync();
+        else if (action == "Add front/back batches")
+            await AddImageBatchAsync();
+    }
+
+    private async void OnViewDeckClicked(object? sender, EventArgs e)
+    {
+        if (Cards.Count == 0)
+        {
+            await DisplayAlert("View deck", "Add or load cards before opening the deck.", "OK");
+            return;
+        }
+
+        await Navigation.PushModalAsync(new DeckPage(Cards, OnDeckCardSelected));
+    }
+
+    private async Task OnDeckCardSelected(FlashCard card)
+    {
+        DiscardedCards.Remove(card);
+        _currentCard = card;
+        _showingBack = false;
+        _imageScale = 1;
+        RefreshFlashArea();
+        StatusLabel.Text = "Selected card from deck";
+        await SaveStateAsync();
+        await PageScroll.ScrollToAsync(FlashCardBorder, ScrollToPosition.Center, false);
+        await JiggleImageAsync();
+    }
+
+    private async Task AddSingleImageAsync()
+    {
         var file = await PickFileAsync("Select the front image");
         if (file is null)
             return;
@@ -213,34 +283,151 @@ public partial class MainPage : ContentPage
             return;
 
         var card = new FlashCard { Name = draft.FrontName, FrontImage = draft.FrontPath, BackImage = draft.BackPath, BackName = draft.BackName };
+        ValidateCards(new[] { card });
+        var replaceExisting = Cards.Count > 0;
+        if (replaceExisting && !await ConfirmImageDataReplacementAsync(1))
+            return;
+
+        Cards.Clear();
+        DiscardedCards.Clear();
         Cards.Add(card);
         _currentCard = card;
         _showingBack = false;
         RefreshFlashArea();
         await SaveStateAsync();
         await JiggleImageAsync();
-        StatusLabel.Text = string.IsNullOrWhiteSpace(draft.BackPath) ? "Added (no back image)" : "Card added";
+        StatusLabel.Text = replaceExisting
+            ? "Replaced current data with 1 card"
+            : string.IsNullOrWhiteSpace(draft.BackPath) ? "Added (no back image)" : "Card added";
     }
 
-    private async void OnLoadDataClicked(object? sender, EventArgs e)
+    private async Task AddImageBatchAsync()
     {
-        var file = await PickFileAsync("Select a flashcard package or JSON file", ".flashcards");
-        if (file is null)
+        var frontFiles = await PickMultipleImageFilesAsync("Select the front images");
+        if (frontFiles is null || frontFiles.Count == 0)
+            return;
+
+        var backFiles = await PickMultipleImageFilesAsync("Select the matching back images");
+        if (backFiles is null || backFiles.Count == 0)
+            return;
+
+        frontFiles = frontFiles.OrderBy(file => file.FileName, NaturalFileNameComparer.Instance).ToList();
+        backFiles = backFiles.OrderBy(file => file.FileName, NaturalFileNameComparer.Instance).ToList();
+        if (frontFiles.Count != backFiles.Count)
+        {
+            await DisplayAlert("Add image batch", $"The front batch has {frontFiles.Count} images and the back batch has {backFiles.Count}. Select the same number of each side.", "OK");
+            return;
+        }
+
+        var replaceExisting = Cards.Count > 0;
+        if (replaceExisting && !await ConfirmImageDataReplacementAsync(frontFiles.Count))
             return;
 
         await RunBusyAsync(async () =>
         {
-            var imported = await ReadCardsAsync(file);
-            if (imported.Count == 0)
-                throw new InvalidDataException("The JSON file does not contain any valid cards.");
+            var addedCards = new List<FlashCard>(frontFiles.Count);
+            for (var i = 0; i < frontFiles.Count; i++)
+            {
+                var front = frontFiles[i];
+                var back = backFiles[i];
+                var name = Path.GetFileNameWithoutExtension(front.FileName);
+                addedCards.Add(new FlashCard
+                {
+                    Name = name,
+                    FrontImage = await CopyToAppDataAsync(front),
+                    BackImage = await CopyToAppDataAsync(back),
+                    BackName = Path.GetFileNameWithoutExtension(back.FileName)
+                });
+            }
 
-            var loadConfirmed = await DisplayAlert(
-                "Load data",
-                $"Validated {imported.Count} cards. Loading will replace the current cards. Continue?",
-                "Yes",
-                "No");
-            if (!loadConfirmed)
-                return;
+            ValidateCards(addedCards);
+            Cards.Clear();
+            DiscardedCards.Clear();
+            foreach (var card in addedCards)
+                Cards.Add(card);
+
+            _currentCard = addedCards[0];
+            _showingBack = false;
+            RefreshFlashArea();
+            await SaveStateAsync();
+            StatusLabel.Text = replaceExisting
+                ? $"Replaced current data with {addedCards.Count} paired cards"
+                : $"Added {addedCards.Count} paired cards";
+        });
+    }
+
+    private async Task<bool> ConfirmImageDataReplacementAsync(int incomingCardCount)
+    {
+        var cardText = incomingCardCount == 1 ? "1 card" : $"{incomingCardCount} cards";
+        return await DisplayAlert(
+            "Overwrite current data?",
+            $"Adding these images will replace all {Cards.Count} cards currently loaded with {cardText}. Continue?",
+            "Overwrite",
+            "Cancel");
+    }
+
+    private async Task<List<FileResult>?> PickMultipleImageFilesAsync(string title)
+    {
+        try
+        {
+            var files = await FilePicker.Default.PickMultipleAsync(new PickOptions
+            {
+                PickerTitle = title,
+                FileTypes = FilePickerFileType.Images
+            });
+            var selectedFiles = files?.ToList();
+            if (selectedFiles is not null && selectedFiles.Any(file => !IsImageFile(file.FileName)))
+            {
+                await DisplayAlert("File selection", "Please select only image files.", "OK");
+                return null;
+            }
+
+            return selectedFiles;
+        }
+        catch (Exception ex)
+        {
+            await DisplayAlert("File selection", ex.Message, "OK");
+            return null;
+        }
+    }
+
+    private async void OnLoadDataClicked(object? sender, EventArgs e)
+    {
+        var source = await DisplayActionSheet("Load data", "Cancel", null, "From device", "Built-in or saved dataset");
+        if (source == "Built-in or saved dataset")
+        {
+            await LoadBuiltInDataSetAsync();
+            return;
+        }
+
+        if (source != "From device")
+            return;
+
+        var file = await PickFileAsync("Select a flashcard package or JSON file", "data");
+        if (file is not null)
+            await LoadDataAsync(() => ReadCardsAsync(file));
+    }
+
+    private async Task LoadDataAsync(Func<Task<List<FlashCard>>> readCards)
+    {
+        await RunBusyAsync(async () =>
+        {
+            var imported = await readCards();
+            if (imported.Count == 0)
+                throw new InvalidDataException("The selected data does not contain any valid cards.");
+
+            ValidateCards(imported);
+            if (Cards.Count > 0)
+            {
+                ValidateCards(Cards);
+                var overwriteConfirmed = await DisplayAlert(
+                    "Overwrite current data?",
+                    $"Validated {imported.Count} incoming cards. Loading them will replace all {Cards.Count} current cards. Continue?",
+                    "Overwrite",
+                    "Cancel");
+                if (!overwriteConfirmed)
+                    return;
+            }
 
             Cards.Clear();
             DiscardedCards.Clear();
@@ -255,15 +442,208 @@ public partial class MainPage : ContentPage
         });
     }
 
+    private async Task LoadBuiltInDataSetAsync(bool increment = false)
+    {
+        var operation = increment ? "Increment" : "Load";
+        while (true)
+        {
+            List<DataSetChoice>? choices = null;
+            await RunBusyAsync(async () => choices = await GetDataSetChoicesAsync());
+            if (choices is null)
+                return;
+            if (choices.Count == 0)
+            {
+                await DisplayAlert($"{operation} data", "No built-in or saved datasets are available.", "OK");
+                return;
+            }
+
+            var selectedName = await DisplayActionSheet($"Select a dataset to {operation.ToLowerInvariant()}", "Cancel", null, choices.Select(choice => choice.DisplayName).ToArray());
+            var selectedChoice = choices.FirstOrDefault(choice => choice.DisplayName == selectedName);
+            if (selectedChoice is null)
+                return;
+
+            var selectedAction = await DisplayActionSheet(
+                $"Dataset: {selectedChoice.Name}",
+                "Cancel",
+                "Delete",
+                operation);
+            if (selectedAction == "Delete")
+            {
+                var confirmationMessage = selectedChoice.IsPackaged
+                    ? $"Remove '{selectedChoice.Name}' from the dataset chooser? The built-in package remains installed."
+                    : $"Delete '{selectedChoice.Name}' from this app? This cannot be undone.";
+                var confirmed = await DisplayAlert(
+                    selectedChoice.IsPackaged ? "Hide built-in dataset" : "Delete saved dataset",
+                    confirmationMessage,
+                    selectedChoice.IsPackaged ? "Hide" : "Delete",
+                    "Cancel");
+                if (confirmed)
+                {
+                    try
+                    {
+                        if (selectedChoice.IsPackaged)
+                            await HideBuiltInDataSetAsync(selectedChoice);
+                        else
+                            DeleteSavedDataSet(selectedChoice);
+                    }
+                    catch (Exception ex)
+                    {
+                        await DisplayAlert("Remove dataset", ex.Message, "OK");
+                    }
+                }
+
+                continue;
+            }
+
+            if (selectedAction != operation)
+                return;
+
+            if (increment)
+                await IncrementDataAsync(() => ReadDataSetAsync(selectedChoice));
+            else
+                await LoadDataAsync(() => ReadDataSetAsync(selectedChoice));
+            return;
+        }
+    }
+
+    private static async Task<List<DataSetChoice>> GetDataSetChoicesAsync()
+    {
+        await using var catalogStream = await FileSystem.OpenAppPackageFileAsync("DataSets/datasets.json");
+        var catalog = await JsonSerializer.DeserializeAsync<List<BuiltInDataSet>>(catalogStream, JsonOptions)
+            ?? throw new InvalidDataException("The built-in dataset catalog is invalid.");
+        var hiddenBuiltInFiles = await ReadHiddenBuiltInDataSetsAsync();
+        var packagedChoices = new List<DataSetChoice>();
+        foreach (var dataset in catalog)
+        {
+            if (string.IsNullOrWhiteSpace(dataset.Name) ||
+                string.IsNullOrWhiteSpace(dataset.File) ||
+                Path.GetFileName(dataset.File) != dataset.File ||
+                !dataset.File.EndsWith(".flashcards", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The built-in dataset catalog contains an invalid entry.");
+
+            if (!hiddenBuiltInFiles.Contains(dataset.File))
+                packagedChoices.Add(new DataSetChoice { Name = dataset.Name, File = dataset.File, IsPackaged = true });
+        }
+
+        Directory.CreateDirectory(UserDataSetsDirectory);
+        var savedChoices = Directory.EnumerateFiles(UserDataSetsDirectory)
+            .Where(file => Path.GetExtension(file).Equals(".flashcards", StringComparison.OrdinalIgnoreCase))
+            .Select(file => new
+            {
+                Choice = new DataSetChoice
+                {
+                    Name = Path.GetFileNameWithoutExtension(file),
+                    File = Path.GetFileName(file),
+                    IsPackaged = false
+                },
+                LastWriteTime = File.GetLastWriteTime(file)
+            })
+            .OrderByDescending(item => item.LastWriteTime)
+            .ThenBy(item => item.Choice.Name, NaturalFileNameComparer.Instance)
+            .Select(item => item.Choice);
+
+        var choices = savedChoices
+            .Concat(packagedChoices.OrderBy(choice => choice.Name, NaturalFileNameComparer.Instance))
+            .ToList();
+        return choices;
+    }
+
+    private static async Task<HashSet<string>> ReadHiddenBuiltInDataSetsAsync()
+    {
+        if (!File.Exists(HiddenBuiltInDataSetsPath))
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        await using var stream = File.OpenRead(HiddenBuiltInDataSetsPath);
+        var hiddenFiles = await JsonSerializer.DeserializeAsync<List<string>>(stream, JsonOptions) ?? new List<string>();
+        return hiddenFiles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static async Task HideBuiltInDataSetAsync(DataSetChoice choice)
+    {
+        if (!choice.IsPackaged || Path.GetFileName(choice.File) != choice.File ||
+            !choice.File.EndsWith(".flashcards", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only a built-in dataset can be hidden this way.");
+
+        var hiddenFiles = await ReadHiddenBuiltInDataSetsAsync();
+        hiddenFiles.Add(choice.File);
+        var temporaryPath = $"{HiddenBuiltInDataSetsPath}.tmp";
+        try
+        {
+            await using (var stream = File.Create(temporaryPath))
+                await JsonSerializer.SerializeAsync(stream, hiddenFiles, JsonOptions);
+            File.Move(temporaryPath, HiddenBuiltInDataSetsPath, true);
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+        }
+    }
+
+    private static void DeleteSavedDataSet(DataSetChoice choice)
+    {
+        if (choice.IsPackaged || Path.GetFileName(choice.File) != choice.File ||
+            !choice.File.EndsWith(".flashcards", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Only app-saved datasets can be deleted.");
+
+        var dataSetsDirectory = Path.GetFullPath(UserDataSetsDirectory);
+        var targetPath = Path.GetFullPath(Path.Combine(dataSetsDirectory, choice.File));
+        var directoryPrefix = dataSetsDirectory.EndsWith(Path.DirectorySeparatorChar)
+            ? dataSetsDirectory
+            : dataSetsDirectory + Path.DirectorySeparatorChar;
+        if (!targetPath.StartsWith(directoryPrefix, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The saved dataset path is invalid.");
+
+        File.Delete(targetPath);
+    }
+
+    private static async Task<List<FlashCard>> ReadDataSetAsync(DataSetChoice choice)
+    {
+        if (choice.IsPackaged)
+        {
+            await using var packagedStream = await FileSystem.OpenAppPackageFileAsync($"DataSets/{choice.File}");
+            return await ReadPackageCardsAsync(packagedStream);
+        }
+
+        if (Path.GetFileName(choice.File) != choice.File ||
+            !choice.File.EndsWith(".flashcards", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The saved dataset has an invalid package filename.");
+
+        await using var savedStream = File.OpenRead(Path.Combine(UserDataSetsDirectory, choice.File));
+        return await ReadPackageCardsAsync(savedStream);
+    }
+
     private async void OnIncrementDataClicked(object? sender, EventArgs e)
     {
-        var file = await PickFileAsync("Select a flashcard package or JSON file", ".flashcards");
+        var source = await DisplayActionSheet("Increment data", "Cancel", null, "From device", "Built-in or saved dataset");
+        if (source == "Built-in or saved dataset")
+        {
+            await LoadBuiltInDataSetAsync(increment: true);
+            return;
+        }
+
+        if (source != "From device")
+            return;
+
+        var file = await PickFileAsync("Select a flashcard package or JSON file", "data");
         if (file is null)
             return;
 
+        await IncrementDataAsync(() => ReadCardsAsync(file));
+    }
+
+    private async Task IncrementDataAsync(Func<Task<List<FlashCard>>> readCards)
+    {
         await RunBusyAsync(async () =>
         {
-            var imported = await ReadCardsAsync(file);
+            var imported = await readCards();
+            if (imported.Count == 0)
+                throw new InvalidDataException("The selected data does not contain any valid cards.");
+
+            ValidateCards(imported);
+            if (Cards.Count > 0)
+                ValidateCards(Cards);
+
             var existingNames = Cards
                 .Select(card => card.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -276,13 +656,18 @@ public partial class MainPage : ContentPage
                 return;
             }
 
-            var incrementConfirmed = await DisplayAlert(
-                "Increment data",
-                $"Validated {imported.Count} cards. {newCards.Count} new cards will be added. Continue?",
-                "Yes",
-                "No");
-            if (!incrementConfirmed)
-                return;
+            var mergedCards = Cards.Concat(newCards).ToList();
+            ValidateCards(mergedCards);
+            if (Cards.Count > 0)
+            {
+                var incrementConfirmed = await DisplayAlert(
+                    "Add to current data?",
+                    $"Validated {imported.Count} incoming cards. {newCards.Count} new cards will be added to the current {Cards.Count} cards. Continue?",
+                    "Add",
+                    "Cancel");
+                if (!incrementConfirmed)
+                    return;
+            }
 
             foreach (var card in newCards)
                 Cards.Add(card);
@@ -290,7 +675,7 @@ public partial class MainPage : ContentPage
             _currentCard ??= Cards.FirstOrDefault();
             RefreshFlashArea();
             await SaveStateAsync();
-            StatusLabel.Text = $"Merged {imported.Count} cards";
+            StatusLabel.Text = $"Added {newCards.Count} cards";
         });
     }
 
@@ -340,6 +725,62 @@ public partial class MainPage : ContentPage
             var hasGeneratedPath = !string.IsNullOrWhiteSpace(_generatedFilePath);
             LocateButton.IsEnabled = hasGeneratedPath;
             StatusLabel.Text = "JSON exported successfully";
+        });
+    }
+
+    private async void OnSaveInAppClicked(object? sender, EventArgs e)
+    {
+        if (Cards.Count == 0)
+        {
+            await DisplayAlert("Save dataset", "Add or load at least one card first.", "OK");
+            return;
+        }
+
+        var enteredName = await DisplayPromptAsync(
+            "Save dataset",
+            "Enter a name for this dataset.",
+            accept: "Continue",
+            cancel: "Cancel",
+            placeholder: "My flashcards",
+            maxLength: 80);
+        if (string.IsNullOrWhiteSpace(enteredName))
+            return;
+
+        var datasetName = SanitizeDataSetName(enteredName);
+        if (string.IsNullOrWhiteSpace(datasetName))
+        {
+            await DisplayAlert("Save dataset", "Enter a valid dataset name.", "OK");
+            return;
+        }
+
+        var targetPath = Path.Combine(UserDataSetsDirectory, $"{datasetName}.flashcards");
+        if (File.Exists(targetPath) &&
+            !await DisplayAlert("Replace dataset", $"A saved dataset named '{datasetName}' already exists. Replace it?", "Replace", "Cancel"))
+            return;
+
+        await RunBusyAsync(async () =>
+        {
+            ValidateCards(Cards);
+            Directory.CreateDirectory(UserDataSetsDirectory);
+            string? packagePath = null;
+            var temporaryPath = Path.Combine(UserDataSetsDirectory, $"{Guid.NewGuid():N}.tmp");
+            try
+            {
+                packagePath = await CreatePackageAsync(Cards);
+                await using (var source = File.OpenRead(packagePath))
+                await using (var destination = File.Create(temporaryPath))
+                    await source.CopyToAsync(destination);
+
+                File.Move(temporaryPath, targetPath, true);
+                StatusLabel.Text = $"Saved dataset: {datasetName}";
+            }
+            finally
+            {
+                if (packagePath is not null && File.Exists(packagePath))
+                    File.Delete(packagePath);
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
         });
     }
 
@@ -499,6 +940,13 @@ public partial class MainPage : ContentPage
 
     private async void OnFlashImageTapped(object? sender, TappedEventArgs e)
     {
+#if ANDROID
+        if (DateTime.UtcNow < _androidSuppressTapUntil)
+        {
+            _androidSuppressTapUntil = DateTime.MinValue;
+            return;
+        }
+#endif
         await AnimateFlipAsync();
     }
 
@@ -509,34 +957,125 @@ public partial class MainPage : ContentPage
             case GestureStatus.Started:
                 _panStartTranslationX = FlashImageFrame.TranslationX;
                 _panStartTranslationY = FlashImageFrame.TranslationY;
+#if ANDROID
+                _androidSuppressTapUntil = DateTime.MinValue;
+                _androidPanActive = false;
+                _androidPanHoldCancellation?.Cancel();
+                _androidPanHoldCancellation = new CancellationTokenSource();
+                _ = ActivateAndroidPanAsync(_androidPanHoldCancellation.Token);
+#endif
                 break;
             case GestureStatus.Running:
-                FlashImageFrame.TranslationX = _panStartTranslationX + e.TotalX;
-                FlashImageFrame.TranslationY = _panStartTranslationY + e.TotalY;
+#if ANDROID
+                if (!_androidPanActive || _androidPinchActive)
+                    break;
+
+                var parent = FlashImageFrame.Parent as VisualElement;
+                var maxTranslationX = parent is null
+                    ? 0
+                    : Math.Max(0, (parent.Width - (FlashImageFrame.Width * FlashImageFrame.Scale)) / 2);
+                var maxTranslationY = parent is null
+                    ? 0
+                    : Math.Max(0, (parent.Height - (FlashImageFrame.Height * FlashImageFrame.Scale)) / 2);
+                var targetTranslationX = _panStartTranslationX + (e.TotalX * PanSensitivity);
+                var targetTranslationY = _panStartTranslationY + (e.TotalY * PanSensitivity);
+                FlashImageFrame.TranslationX = Math.Clamp(targetTranslationX, -maxTranslationX, maxTranslationX);
+                FlashImageFrame.TranslationY = Math.Clamp(targetTranslationY, -maxTranslationY, maxTranslationY);
+#else
+                FlashImageFrame.TranslationX = _panStartTranslationX + (e.TotalX * PanSensitivity);
+                FlashImageFrame.TranslationY = _panStartTranslationY + (e.TotalY * PanSensitivity);
+#endif
                 break;
             case GestureStatus.Completed:
             case GestureStatus.Canceled:
+#if ANDROID
+                _androidPanHoldCancellation?.Cancel();
+                _androidPanHoldCancellation = null;
+                var wasAndroidPanActive = _androidPanActive;
+                _androidPanActive = false;
+                _ = ResetAndroidPanAsync(wasAndroidPanActive);
+#else
                 _ = FlashImageFrame.TranslateTo(0, 0, 250, Easing.SinOut);
+#endif
                 break;
         }
     }
+
+#if ANDROID
+    private async Task ActivateAndroidPanAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await Task.Delay(AndroidPanHoldDurationMilliseconds, cancellationToken);
+            if (cancellationToken.IsCancellationRequested || _androidPinchActive)
+                return;
+
+            _androidPanActive = true;
+            _androidSuppressTapUntil = DateTime.UtcNow.AddMilliseconds(500);
+            await FlashImageFrame.ScaleTo(Math.Min(_imageScale * 1.05, 2), 100, Easing.SinOut);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
+    private async Task ResetAndroidPanAsync(bool wasActive)
+    {
+        await FlashImageFrame.TranslateTo(0, 0, 250, Easing.CubicOut);
+        if (wasActive)
+        {
+            await FlashImageFrame.ScaleTo(1, 250, Easing.CubicOut);
+            SetZoom(1);
+        }
+    }
+#endif
 
     private void OnFlashImagePinchUpdated(object? sender, PinchGestureUpdatedEventArgs e)
     {
         switch (e.Status)
         {
             case GestureStatus.Started:
-                _pinchStartScale = FlashImageFrame.Scale;
+#if ANDROID
+                _androidPinchActive = true;
+                _androidSuppressTapUntil = DateTime.UtcNow.AddMilliseconds(500);
+                _androidPanHoldCancellation?.Cancel();
+                _androidPanHoldCancellation = null;
+                _androidPanActive = false;
+                SetZoom(_imageScale);
+#endif
+                _pinchStartScale = _imageScale;
                 break;
             case GestureStatus.Running:
+#if ANDROID
+                var pinchDelta = e.Scale - 1;
+                if (Math.Abs(pinchDelta) < .01)
+                    break;
+
+                var pinchDirection = Math.Sign(pinchDelta);
+                SetZoom(Math.Clamp(_pinchStartScale + (Math.Abs(pinchDelta) * pinchDirection), .6, 2));
+#else
                 SetZoom(Math.Clamp(_pinchStartScale * e.Scale, .6, 2));
+#endif
                 break;
             case GestureStatus.Completed:
             case GestureStatus.Canceled:
-                _ = AnimateGestureScaleBackAsync();
+#if ANDROID
+                _androidPinchActive = false;
+                _ = ResetAndroidPinchAsync();
+#else
+                SetZoom(_imageScale);
+#endif
                 break;
         }
     }
+
+#if ANDROID
+    private async Task ResetAndroidPinchAsync()
+    {
+        await FlashImageFrame.ScaleTo(1, 250, Easing.CubicOut);
+        SetZoom(1);
+    }
+#endif
 
 #if WINDOWS
     private void OnWindowsPointerWheelChanged(object sender, PointerRoutedEventArgs e)
@@ -717,10 +1256,10 @@ public partial class MainPage : ContentPage
             _currentCard = card;
             RefreshFlashArea();
             await Task.Delay(120);
-            DiscardedCards.Add(card);
+            DiscardedCards.Insert(0, card);
         }
 
-        ScrollDiscardCollectionToEnd();
+        ScrollDiscardCollectionToStart();
         _currentCard = Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
@@ -735,8 +1274,8 @@ public partial class MainPage : ContentPage
 
         if (!DiscardedCards.Contains(CurrentCard))
         {
-            DiscardedCards.Add(CurrentCard);
-            ScrollDiscardCollectionToEnd();
+            DiscardedCards.Insert(0, CurrentCard);
+            ScrollDiscardCollectionToStart();
         }
 
         await SaveStateAsync();
@@ -923,6 +1462,8 @@ public partial class MainPage : ContentPage
         PauseButton.Text = _autoRollPaused ? "Play" : "Pause";
 
         AddImageButton.IsEnabled = canUseOtherActions;
+        ViewDeckButton.IsEnabled = canUseOtherActions && Cards.Count > 0;
+        SaveInAppButton.IsEnabled = canUseOtherActions;
         LoadDataButton.IsEnabled = canUseOtherActions;
         GenerateDataButton.IsEnabled = canUseOtherActions;
         IncrementDataButton.IsEnabled = canUseOtherActions;
@@ -931,6 +1472,9 @@ public partial class MainPage : ContentPage
         ZoomInButton.IsEnabled = canUseOtherActions;
         ZoomOutButton.IsEnabled = canUseOtherActions;
         ResetZoomButton.IsEnabled = canUseOtherActions && Math.Abs(_imageScale - 1) > .001;
+        AndroidMaximizedZoomInButton.IsEnabled = ZoomInButton.IsEnabled;
+        AndroidMaximizedZoomOutButton.IsEnabled = ZoomOutButton.IsEnabled;
+        AndroidMaximizedResetZoomButton.IsEnabled = ResetZoomButton.IsEnabled;
         RollButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
         FlashButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
         FlashAllButton.IsEnabled = canUseOtherActions && cardsOnHand > 0;
@@ -952,6 +1496,8 @@ public partial class MainPage : ContentPage
         {
             AutoRollButton,
             AddImageButton,
+            ViewDeckButton,
+            SaveInAppButton,
             LoadDataButton,
             GenerateDataButton,
             IncrementDataButton,
@@ -978,6 +1524,10 @@ public partial class MainPage : ContentPage
         MaximizeButton.BackgroundColor = green;
         MinimizeButton.BackgroundColor = green;
         ResetZoomButton.BackgroundColor = ResetZoomButton.IsEnabled && !isRunning ? green : gray;
+        AndroidMaximizedMinimizeButton.BackgroundColor = green;
+        AndroidMaximizedResetZoomButton.BackgroundColor = AndroidMaximizedResetZoomButton.IsEnabled && !isRunning ? green : gray;
+        AndroidMaximizedZoomInButton.BackgroundColor = AndroidMaximizedZoomInButton.IsEnabled && !isRunning ? green : gray;
+        AndroidMaximizedZoomOutButton.BackgroundColor = AndroidMaximizedZoomOutButton.IsEnabled && !isRunning ? green : gray;
         SelectAllButton.BackgroundColor = SelectAllButton.IsEnabled && !isRunning ? green : gray;
         ReturnButton.BackgroundColor = ReturnButton.IsEnabled && !isRunning ? green : gray;
         DeleteButton.BackgroundColor = isRunning
@@ -1006,10 +1556,10 @@ public partial class MainPage : ContentPage
         UpdateDiscardActions();
     }
 
-    private void ScrollDiscardCollectionToEnd()
+    private void ScrollDiscardCollectionToStart()
     {
         if (DiscardedCards.Count > 0)
-            DiscardCollection.ScrollTo(DiscardedCards.Count - 1, position: ScrollToPosition.End, animate: true);
+            DiscardCollection.ScrollTo(0, position: ScrollToPosition.Start, animate: true);
     }
 
     private void UpdateDiscardActions()
@@ -1079,8 +1629,18 @@ public partial class MainPage : ContentPage
 
     private void OnMaximizeClicked(object? sender, EventArgs e)
     {
+        SetZoom(1);
+        CaptureNormalImageFrameSize();
         _isMaximized = !_isMaximized;
         ApplyMaximizeState();
+    }
+
+    private void CaptureNormalImageFrameSize()
+    {
+        if (FlashImageFrame.Width > 0)
+            _normalImageFrameWidth = FlashImageFrame.Width;
+        if (FlashImageFrame.Height > 0)
+            _normalImageFrameHeight = FlashImageFrame.Height;
     }
 
     private void OnPageScrollSizeChanged(object? sender, EventArgs e)
@@ -1091,8 +1651,16 @@ public partial class MainPage : ContentPage
 
     private async void OnMinimizeClicked(object? sender, EventArgs e)
     {
+        SetZoom(1);
         _isMaximized = false;
+        RestoreAndroidMaximizedControlsToRoot();
+        AndroidMaximizedFlashAreaHeader.IsVisible = false;
+        AndroidMaximizedImageControlsBorder.IsVisible = false;
+        RestoreTopControlPanelToWorkspace();
+        PageScroll.IsVisible = true;
+        FlashCardBorder.HeightRequest = -1;
         Workspace.HeightRequest = -1;
+        Grid.SetRow(FlashAreaHeader, 2);
         Grid.SetRow(FlashCardBorder, 3);
         for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
             Workspace.RowDefinitions[i].Height = i == 3 ? new GridLength(NormalFlashAreaHeight) : GridLength.Auto;
@@ -1103,6 +1671,7 @@ public partial class MainPage : ContentPage
         FlashAreaHeader.IsVisible = true;
         DiscardSection.IsVisible = true;
         GeneratedFileRow.IsVisible = true;
+        FlashCardControls.IsVisible = true;
         PageScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Default;
         MaximizeButton.IsVisible = true;
         MinimizeButton.IsVisible = false;
@@ -1115,20 +1684,56 @@ public partial class MainPage : ContentPage
 
     private void ApplyMaximizeState()
     {
-        var flashAreaHeight = Math.Max(
-            PageScroll.Height - Workspace.Padding.VerticalThickness - MaximizedBottomReserve,
-            NormalFlashAreaHeight);
-        for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
-            Workspace.RowDefinitions[i].Height = _isMaximized && i != 3 ? new GridLength(0) : GridLength.Auto;
+        var isAndroid = DeviceInfo.Current.Platform == DevicePlatform.Android;
+        var useAndroidMaximizedHeader = _isMaximized && isAndroid;
+        if (useAndroidMaximizedHeader)
+        {
+            RestoreTopControlPanelToWorkspace();
+            MoveAndroidMaximizedControlsToWorkspace();
+        }
+        else
+        {
+            RestoreAndroidMaximizedControlsToRoot();
+        }
+
+        if (_isMaximized && !useAndroidMaximizedHeader)
+            MoveTopControlPanelToRoot();
+        else if (!_isMaximized)
+            RestoreTopControlPanelToWorkspace();
+
+        PageScroll.IsVisible = true;
+        var flashAreaHeight = useAndroidMaximizedHeader
+            ? AndroidMaximizedFlashAreaHeight
+            : Math.Max(
+                PageScroll.Height - Workspace.Padding.VerticalThickness - MaximizedBottomReserve - 48,
+                NormalFlashAreaHeight);
         Workspace.Padding = _isMaximized ? new Thickness(12, 0, 12, 12) : new Thickness(12);
-        var maximizedHeight = flashAreaHeight + MaximizedScrollExtension;
-        Workspace.HeightRequest = _isMaximized ? maximizedHeight : -1;
-        Grid.SetRow(FlashCardBorder, _isMaximized ? 0 : 3);
-        Workspace.RowDefinitions[0].Height = _isMaximized ? new GridLength(maximizedHeight) : GridLength.Auto;
-        Workspace.RowDefinitions[3].Height = _isMaximized ? new GridLength(0) : new GridLength(NormalFlashAreaHeight);
-        TopControlPanel.IsVisible = !_isMaximized;
+        var maximizedHeight = flashAreaHeight + (useAndroidMaximizedHeader ? 0 : MaximizedScrollExtension);
+        Workspace.HeightRequest = useAndroidMaximizedHeader
+            ? -1
+            : _isMaximized ? maximizedHeight : -1;
+        Grid.SetRow(FlashAreaHeader, _isMaximized && !useAndroidMaximizedHeader ? 0 : 2);
+        Grid.SetRow(FlashCardBorder, useAndroidMaximizedHeader ? 3 : _isMaximized ? 1 : 3);
+        for (var i = 0; i < Workspace.RowDefinitions.Count; i++)
+        {
+            Workspace.RowDefinitions[i].Height = useAndroidMaximizedHeader
+                ? i switch
+                {
+                    0 or 1 or 2 => GridLength.Auto,
+                    3 => new GridLength(AndroidMaximizedFlashAreaHeight),
+                    _ => new GridLength(0)
+                }
+                : _isMaximized ? new GridLength(0) : i == 3 ? new GridLength(NormalFlashAreaHeight) : GridLength.Auto;
+        }
+        if (_isMaximized && !useAndroidMaximizedHeader)
+            Workspace.RowDefinitions[1].Height = new GridLength(maximizedHeight);
+        FlashCardBorder.HeightRequest = useAndroidMaximizedHeader ? AndroidMaximizedFlashAreaHeight : -1;
+        TopControlPanel.IsVisible = true;
         DataManagementPanel.IsVisible = !_isMaximized;
-        FlashAreaHeader.IsVisible = !_isMaximized;
+        AndroidMaximizedFlashAreaHeader.IsVisible = useAndroidMaximizedHeader;
+        AndroidMaximizedImageControlsBorder.IsVisible = useAndroidMaximizedHeader;
+        FlashAreaHeader.IsVisible = !useAndroidMaximizedHeader;
+        FlashCardControls.IsVisible = !useAndroidMaximizedHeader;
         DiscardSection.IsVisible = !_isMaximized;
         GeneratedFileRow.IsVisible = !_isMaximized;
         PageScroll.VerticalScrollBarVisibility = ScrollBarVisibility.Default;
@@ -1138,6 +1743,58 @@ public partial class MainPage : ContentPage
         Workspace.InvalidateMeasure();
         if (_isMaximized)
             _ = PageScroll.ScrollToAsync(0, 0, false);
+    }
+
+    private void MoveTopControlPanelToRoot()
+    {
+        if (Workspace.Children.Contains(TopControlPanel))
+            Workspace.Children.Remove(TopControlPanel);
+
+        if (!RootLayout.Children.Contains(TopControlPanel))
+            RootLayout.Children.Add(TopControlPanel);
+
+        Grid.SetRow(TopControlPanel, 0);
+    }
+
+    private void MoveAndroidMaximizedControlsToWorkspace()
+    {
+        if (RootLayout.Children.Contains(AndroidMaximizedFlashAreaHeader))
+            RootLayout.Children.Remove(AndroidMaximizedFlashAreaHeader);
+        if (!Workspace.Children.Contains(AndroidMaximizedFlashAreaHeader))
+            Workspace.Children.Add(AndroidMaximizedFlashAreaHeader);
+        Grid.SetRow(AndroidMaximizedFlashAreaHeader, 1);
+
+        if (RootLayout.Children.Contains(AndroidMaximizedImageControlsBorder))
+            RootLayout.Children.Remove(AndroidMaximizedImageControlsBorder);
+        if (!Workspace.Children.Contains(AndroidMaximizedImageControlsBorder))
+            Workspace.Children.Add(AndroidMaximizedImageControlsBorder);
+        Grid.SetRow(AndroidMaximizedImageControlsBorder, 2);
+    }
+
+    private void RestoreAndroidMaximizedControlsToRoot()
+    {
+        if (Workspace.Children.Contains(AndroidMaximizedFlashAreaHeader))
+            Workspace.Children.Remove(AndroidMaximizedFlashAreaHeader);
+        if (!RootLayout.Children.Contains(AndroidMaximizedFlashAreaHeader))
+            RootLayout.Children.Add(AndroidMaximizedFlashAreaHeader);
+        Grid.SetRow(AndroidMaximizedFlashAreaHeader, 1);
+
+        if (Workspace.Children.Contains(AndroidMaximizedImageControlsBorder))
+            Workspace.Children.Remove(AndroidMaximizedImageControlsBorder);
+        if (!RootLayout.Children.Contains(AndroidMaximizedImageControlsBorder))
+            RootLayout.Children.Add(AndroidMaximizedImageControlsBorder);
+        Grid.SetRow(AndroidMaximizedImageControlsBorder, 2);
+    }
+
+    private void RestoreTopControlPanelToWorkspace()
+    {
+        if (RootLayout.Children.Contains(TopControlPanel))
+            RootLayout.Children.Remove(TopControlPanel);
+
+        if (!Workspace.Children.Contains(TopControlPanel))
+            Workspace.Children.Add(TopControlPanel);
+
+        Grid.SetRow(TopControlPanel, 0);
     }
 
     private async void OnLocateClicked(object? sender, EventArgs e)
@@ -1187,8 +1844,11 @@ public partial class MainPage : ContentPage
 
     private async void OnCopyPathClicked(object sender, EventArgs e)
     {
-        if (string.IsNullOrWhiteSpace(_generatedFilePath))
+        if (string.IsNullOrWhiteSpace(_generatedFilePath) || !File.Exists(_generatedFilePath))
+        {
+            await DisplayAlert("Copy path", "Path File not available or not generated yet", "OK");
             return;
+        }
 
         try
         {
@@ -1217,14 +1877,103 @@ public partial class MainPage : ContentPage
         FlashCardBorder.Stroke = hasBack ? (Color)Application.Current!.Resources["Primary"] : Colors.Red;
         CardNameLabel.Text = _showingBack ? $"{GetBackName(card)} (back)" : card.Name;
         FlashImage.Source = _showingBack && hasBack ? card.BackImage : card.FrontImage;
+        UpdateImageAspectRatio(_showingBack && hasBack ? card.BackImage : card.FrontImage);
         FlashImageFrame.Scale = _imageScale;
         UpdateDiscardActions();
+    }
+
+    private void UpdateImageAspectRatio(string? imagePath)
+    {
+        if (TryGetImageAspectRatio(imagePath, out var aspectRatio))
+            _imageAspectRatio = aspectRatio;
+        else
+            _imageAspectRatio = 4d / 3d;
+
+        if (_isMaximized)
+            ApplyImageLayout();
+    }
+
+    private static bool TryGetImageAspectRatio(string? imagePath, out double aspectRatio)
+    {
+        aspectRatio = 0;
+        if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            return false;
+
+        try
+        {
+            using var stream = File.OpenRead(imagePath);
+            Span<byte> header = stackalloc byte[24];
+            if (stream.Read(header) >= 24 &&
+                header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47)
+            {
+                var width = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+                var height = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+                return SetAspectRatio(width, height, out aspectRatio);
+            }
+
+            stream.Position = 0;
+            if (stream.ReadByte() != 0xFF || stream.ReadByte() != 0xD8)
+                return false;
+
+            while (stream.Position < stream.Length)
+            {
+                if (stream.ReadByte() != 0xFF)
+                    return false;
+
+                var marker = stream.ReadByte();
+                while (marker == 0xFF)
+                    marker = stream.ReadByte();
+
+                if (marker is >= 0xC0 and <= 0xC3 or >= 0xC5 and <= 0xC7 or >= 0xC9 and <= 0xCB or >= 0xCD and <= 0xCF)
+                {
+                    var length = (stream.ReadByte() << 8) | stream.ReadByte();
+                    if (length < 7)
+                        return false;
+
+                    stream.ReadByte();
+                    var height = (stream.ReadByte() << 8) | stream.ReadByte();
+                    var width = (stream.ReadByte() << 8) | stream.ReadByte();
+                    return SetAspectRatio(width, height, out aspectRatio);
+                }
+
+                var segmentLength = (stream.ReadByte() << 8) | stream.ReadByte();
+                if (segmentLength < 2 || stream.Position + segmentLength - 2 > stream.Length)
+                    return false;
+                stream.Position += segmentLength - 2;
+            }
+        }
+        catch (IOException)
+        {
+        }
+        catch (UnauthorizedAccessException)
+        {
+        }
+
+        return false;
+    }
+
+    private static bool SetAspectRatio(int width, int height, out double aspectRatio)
+    {
+        aspectRatio = height > 0 && width > 0 ? (double)width / height : 0;
+        return aspectRatio > 0 && double.IsFinite(aspectRatio);
     }
 
     private static string GetBackName(FlashCard card) =>
         string.IsNullOrWhiteSpace(card.BackName)
             ? Path.GetFileNameWithoutExtension(card.BackImage)
             : card.BackName;
+
+    private static string SanitizeDataSetName(string name)
+    {
+        var invalidCharacters = Path.GetInvalidFileNameChars().ToHashSet();
+        var safeName = new string(name.Trim()
+            .Select(character => char.IsControl(character) || character is '/' or '\\' || invalidCharacters.Contains(character) ? '-' : character)
+            .ToArray())
+            .Trim(' ', '.');
+        return safeName.EndsWith(".flashcards", StringComparison.OrdinalIgnoreCase)
+            ? safeName[..^".flashcards".Length].Trim(' ', '.')
+            : safeName;
+    }
 
     private static void ValidateCards(IEnumerable<FlashCard> cards)
     {
@@ -1241,7 +1990,15 @@ public partial class MainPage : ContentPage
         {
             var isJson = fileType.Equals(".json", StringComparison.OrdinalIgnoreCase);
             var isPackage = fileType.Equals(".flashcards", StringComparison.OrdinalIgnoreCase);
-            var pickerType = isJson ?
+            var isData = fileType.Equals("data", StringComparison.OrdinalIgnoreCase);
+            var pickerType = isData ?
+                new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
+                {
+                    [DevicePlatform.Android] = new[] { "application/json", "application/zip", "application/octet-stream" },
+                    [DevicePlatform.iOS] = new[] { "public.json", "public.archive" },
+                    [DevicePlatform.MacCatalyst] = new[] { "public.json", "public.archive" },
+                    [DevicePlatform.WinUI] = new[] { ".json", ".flashcards", ".zip" }
+                }) : isJson ?
                 new FilePickerFileType(new Dictionary<DevicePlatform, IEnumerable<string>>
                 {
                     [DevicePlatform.Android] = new[] { "application/json" },
@@ -1257,7 +2014,7 @@ public partial class MainPage : ContentPage
                     [DevicePlatform.WinUI] = new[] { ".flashcards", ".zip" }
                 }) : FilePickerFileType.Images;
             var file = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = title, FileTypes = pickerType });
-            if (!isJson && !isPackage && file is not null && !IsImageFile(file.FileName))
+            if (!isJson && !isPackage && !isData && file is not null && !IsImageFile(file.FileName))
             {
                 await DisplayAlert("File selection", "Please select an image file.", "OK");
                 return null;
@@ -1333,7 +2090,10 @@ public partial class MainPage : ContentPage
     private static async Task<List<FlashCard>> ReadCardsAsync(FileResult file)
     {
         if (IsPackageFile(file.FileName))
-            return await ReadPackageCardsAsync(file);
+        {
+            await using var packageStream = await file.OpenReadAsync();
+            return await ReadPackageCardsAsync(packageStream);
+        }
 
         await using var stream = await file.OpenReadAsync();
         var document = await JsonSerializer.DeserializeAsync<FlashCardDocument>(stream, JsonOptions);
@@ -1353,12 +2113,11 @@ public partial class MainPage : ContentPage
         return cards;
     }
 
-    private static async Task<List<FlashCard>> ReadPackageCardsAsync(FileResult file)
+    private static async Task<List<FlashCard>> ReadPackageCardsAsync(Stream source)
     {
         var temporaryPath = Path.Combine(FileSystem.Current.CacheDirectory, $"{Guid.NewGuid():N}.flashcards");
         try
         {
-            await using (var source = await file.OpenReadAsync())
             await using (var destination = File.Create(temporaryPath))
                 await source.CopyToAsync(destination);
 
@@ -1539,8 +2298,14 @@ internal sealed class NewCardDraft
 
 public sealed class FlashCard
 {
+    private string _name = string.Empty;
+
     [JsonPropertyName("name")]
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => _name;
+        set => _name = RemoveGeneratedIndexPrefix(value ?? string.Empty);
+    }
 
     [JsonPropertyName("frontImage")]
     public string FrontImage { get; set; } = string.Empty;
@@ -1550,6 +2315,21 @@ public sealed class FlashCard
 
     [JsonPropertyName("backName")]
     public string BackName { get; set; } = string.Empty;
+
+    private static string RemoveGeneratedIndexPrefix(string name)
+    {
+        var separatorIndex = name.IndexOf(" - ", StringComparison.Ordinal);
+        if (separatorIndex <= 0)
+            return name;
+
+        for (var index = 0; index < separatorIndex; index++)
+        {
+            if (name[index] is < '0' or > '9')
+                return name;
+        }
+
+        return name[(separatorIndex + 3)..];
+    }
 }
 
 public sealed class FlashCardDocument
@@ -1598,6 +2378,87 @@ public sealed class FlashCardTransfer
 
     [JsonPropertyName("backName")]
     public string BackName { get; set; } = string.Empty;
+}
+
+internal sealed class BuiltInDataSet
+{
+    public string Name { get; set; } = string.Empty;
+    public string File { get; set; } = string.Empty;
+}
+
+internal sealed class DataSetChoice
+{
+    public string Name { get; init; } = string.Empty;
+    public string File { get; init; } = string.Empty;
+    public bool IsPackaged { get; init; }
+    public string DisplayName => $"{Name} ({(IsPackaged ? "Built-in" : "Saved")})";
+}
+
+internal sealed class NaturalFileNameComparer : IComparer<string>
+{
+    public static NaturalFileNameComparer Instance { get; } = new();
+
+    public int Compare(string? left, string? right)
+    {
+        if (ReferenceEquals(left, right))
+            return 0;
+        if (left is null)
+            return -1;
+        if (right is null)
+            return 1;
+
+        var leftIndex = 0;
+        var rightIndex = 0;
+        while (leftIndex < left.Length && rightIndex < right.Length)
+        {
+            if (char.IsDigit(left[leftIndex]) && char.IsDigit(right[rightIndex]))
+            {
+                var leftEnd = leftIndex;
+                var rightEnd = rightIndex;
+                while (leftEnd < left.Length && char.IsDigit(left[leftEnd]))
+                    leftEnd++;
+                while (rightEnd < right.Length && char.IsDigit(right[rightEnd]))
+                    rightEnd++;
+
+                var leftSignificant = leftIndex;
+                var rightSignificant = rightIndex;
+                while (leftSignificant < leftEnd && left[leftSignificant] == '0')
+                    leftSignificant++;
+                while (rightSignificant < rightEnd && right[rightSignificant] == '0')
+                    rightSignificant++;
+
+                var leftSignificantLength = leftEnd - leftSignificant;
+                var rightSignificantLength = rightEnd - rightSignificant;
+                var numberComparison = leftSignificantLength.CompareTo(rightSignificantLength);
+                if (numberComparison != 0)
+                    return numberComparison;
+
+                for (var i = 0; i < leftSignificantLength; i++)
+                {
+                    numberComparison = left[leftSignificant + i].CompareTo(right[rightSignificant + i]);
+                    if (numberComparison != 0)
+                        return numberComparison;
+                }
+
+                var digitRunComparison = (leftEnd - leftIndex).CompareTo(rightEnd - rightIndex);
+                if (digitRunComparison != 0)
+                    return digitRunComparison;
+
+                leftIndex = leftEnd;
+                rightIndex = rightEnd;
+                continue;
+            }
+
+            var characterComparison = char.ToUpperInvariant(left[leftIndex]).CompareTo(char.ToUpperInvariant(right[rightIndex]));
+            if (characterComparison != 0)
+                return characterComparison;
+            leftIndex++;
+            rightIndex++;
+        }
+
+        var lengthComparison = (left.Length - leftIndex).CompareTo(right.Length - rightIndex);
+        return lengthComparison != 0 ? lengthComparison : StringComparer.Ordinal.Compare(left, right);
+    }
 }
 
 internal sealed class FlashCardsState
