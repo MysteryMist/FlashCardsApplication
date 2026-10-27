@@ -15,6 +15,13 @@ namespace FlashCardsApp;
 
 public partial class MainPage : ContentPage
 {
+    private readonly UpdateService _updateService = new(
+        "https://api.github.com/repos/MysteryMist/FlashCardsApplication/releases/latest",
+        "https://github.com/MysteryMist/FlashCardsApplication/releases");
+    private CancellationTokenSource? _updateCheckCancellation;
+    private bool _updateCheckInProgress;
+    private bool _updateAvailable;
+    private string? _updateReleaseUrl;
     private readonly Random _random = new();
     private FlashCard? _currentCard;
     private bool _showingBack;
@@ -66,6 +73,7 @@ public partial class MainPage : ContentPage
 
     public ObservableCollection<FlashCard> Cards { get; } = new();
     public ObservableCollection<FlashCard> DiscardedCards { get; } = new();
+    public string AppVersionText => $"Version {AppInfo.Current.VersionString}{(string.IsNullOrWhiteSpace(AppInfo.Current.BuildString) ? string.Empty : $" (Build {AppInfo.Current.BuildString})")}";
 
     public MainPage()
     {
@@ -89,6 +97,7 @@ public partial class MainPage : ContentPage
 
         _stateLoaded = true;
         await LoadSavedStateAsync();
+        _ = Task.Run(CheckForUpdateInBackgroundAsync);
     }
 
     private FlashCard? CurrentCard => _currentCard;
@@ -219,19 +228,59 @@ public partial class MainPage : ContentPage
             e.Handled = true;
             HandleKeyboardFlip();
         }
-
         else if (e.Key == VirtualKey.F11)
         {
             e.Handled = true;
-            HandleKeyboardMaximize();
+            ToggleAppWindowFullScreen();
         }
-        else if (e.Key == VirtualKey.Escape && _isMaximized)
+        else if (e.Key == VirtualKey.Escape && IsAppWindowFullScreen())
         {
             e.Handled = true;
-            HandleKeyboardMinimize();
+            ToggleAppWindowFullScreen();
         }
     }
 #endif
+
+    private static bool IsAppWindowFullScreen()
+    {
+#if WINDOWS
+        var window = Application.Current?.Windows.FirstOrDefault();
+        if (window is null)
+            return false;
+
+        var platformWindow = window.Handler?.PlatformView as Microsoft.UI.Xaml.Window;
+        if (platformWindow is null)
+            return false;
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(platformWindow);
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+        var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+        return appWindow.Presenter.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
+#else
+        return false;
+#endif
+    }
+
+    private static void ToggleAppWindowFullScreen()
+    {
+#if WINDOWS
+        var window = Application.Current?.Windows.FirstOrDefault();
+        if (window is null)
+            return;
+
+        var platformWindow = window.Handler?.PlatformView as Microsoft.UI.Xaml.Window;
+        if (platformWindow is null)
+            return;
+
+        var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(platformWindow);
+        var windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(hwnd);
+        var appWindow = Microsoft.UI.Windowing.AppWindow.GetFromWindowId(windowId);
+        var isFullScreen = appWindow.Presenter.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
+        appWindow.SetPresenter(isFullScreen
+            ? Microsoft.UI.Windowing.AppWindowPresenterKind.Overlapped
+            : Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+#endif
+    }
 
     private async void OnAddImageClicked(object? sender, EventArgs e)
     {
@@ -506,9 +555,33 @@ public partial class MainPage : ContentPage
         }
     }
 
+    private static async Task<Stream> OpenAppPackageOrLocalFileAsync(string relativePath)
+    {
+        try
+        {
+            return await FileSystem.OpenAppPackageFileAsync(relativePath);
+        }
+        catch (FileNotFoundException) { }
+
+        var pathCandidates = new[]
+        {
+            Path.Combine(AppContext.BaseDirectory, relativePath.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar)),
+            Path.Combine(AppContext.BaseDirectory, "DataSets", Path.GetFileName(relativePath)),
+            Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "Resources", "DataSets", Path.GetFileName(relativePath))
+        };
+
+        foreach (var candidate in pathCandidates.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (File.Exists(candidate))
+                return File.OpenRead(candidate);
+        }
+
+        throw new FileNotFoundException($"The app package file '{relativePath}' could not be found.", relativePath);
+    }
+
     private static async Task<List<DataSetChoice>> GetDataSetChoicesAsync()
     {
-        await using var catalogStream = await FileSystem.OpenAppPackageFileAsync("DataSets/datasets.json");
+        await using var catalogStream = await OpenAppPackageOrLocalFileAsync("DataSets/datasets.json");
         var catalog = await JsonSerializer.DeserializeAsync<List<BuiltInDataSet>>(catalogStream, JsonOptions)
             ?? throw new InvalidDataException("The built-in dataset catalog is invalid.");
         var hiddenBuiltInFiles = await ReadHiddenBuiltInDataSetsAsync();
@@ -543,7 +616,7 @@ public partial class MainPage : ContentPage
             .Select(item => item.Choice);
 
         var choices = savedChoices
-            .Concat(packagedChoices.OrderBy(choice => choice.Name, NaturalFileNameComparer.Instance))
+            .Concat(packagedChoices.OrderByDescending(choice => choice.Name, NaturalFileNameComparer.Instance))
             .ToList();
         return choices;
     }
@@ -601,7 +674,7 @@ public partial class MainPage : ContentPage
     {
         if (choice.IsPackaged)
         {
-            await using var packagedStream = await FileSystem.OpenAppPackageFileAsync($"DataSets/{choice.File}");
+            await using var packagedStream = await OpenAppPackageOrLocalFileAsync($"DataSets/{choice.File}");
             return await ReadPackageCardsAsync(packagedStream);
         }
 
@@ -1841,6 +1914,71 @@ public partial class MainPage : ContentPage
 
     private static Task ShareGeneratedFileAsync(string filePath) =>
         Share.Default.RequestAsync(new ShareFileRequest("Generated flashcards", new ShareFile(filePath)));
+
+    private async void OnCheckForUpdateClicked(object? sender, EventArgs e)
+    {
+        await CheckForUpdateAsync(forceUserPrompt: true);
+    }
+
+    private async Task CheckForUpdateInBackgroundAsync()
+    {
+        await CheckForUpdateAsync(forceUserPrompt: false, suppressStatus: true);
+    }
+
+    private async Task CheckForUpdateAsync(bool forceUserPrompt, bool suppressStatus = false)
+    {
+        if (_updateCheckInProgress)
+            return;
+
+        _updateCheckInProgress = true;
+        _updateCheckCancellation?.Cancel();
+        _updateCheckCancellation = new CancellationTokenSource();
+
+        try
+        {
+            var status = await _updateService.CheckForUpdateAsync(_updateCheckCancellation.Token);
+            if (_updateCheckCancellation.IsCancellationRequested)
+                return;
+
+            _updateAvailable = status.UpdateAvailable;
+            _updateReleaseUrl = status.ReleaseUrl;
+            UpdateUpdateIndicator();
+
+            if (suppressStatus)
+                return;
+
+            if (status.UpdateAvailable)
+            {
+                var message = $"A new version ({status.LatestVersionText}) is available. Open the release page to download it?";
+                var shouldOpen = await DisplayAlert("Update available", message, "Open", "Later");
+                if (shouldOpen && !string.IsNullOrWhiteSpace(_updateReleaseUrl))
+                    await Microsoft.Maui.ApplicationModel.Launcher.Default.OpenAsync(new Uri(_updateReleaseUrl));
+                return;
+            }
+
+            if (forceUserPrompt)
+                await DisplayAlert("Update check", "You are already on the latest version.", "OK");
+        }
+        catch (Exception)
+        {
+            if (forceUserPrompt)
+                await DisplayAlert("Update check", "No update information could be fetched right now. Please try again later.", "OK");
+        }
+        finally
+        {
+            _updateCheckInProgress = false;
+            _updateCheckCancellation?.Dispose();
+            _updateCheckCancellation = null;
+        }
+    }
+
+    private void UpdateUpdateIndicator()
+    {
+        if (UpdateAvailableDot is null)
+            return;
+
+        UpdateAvailableDot.IsVisible = _updateAvailable;
+    }
 
     private async void OnCopyPathClicked(object sender, EventArgs e)
     {

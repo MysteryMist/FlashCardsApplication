@@ -46,7 +46,7 @@
         </Border>
 
         <ScrollView x:Name="PageScroll" Grid.Row="3" VerticalScrollBarVisibility="Default" SizeChanged="OnPageScrollSizeChanged">
-            <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto">
+            <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto,Auto">
             <Border x:Name="TopControlPanel" Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                     <Label Text="TOP CONTROL PANEL" Style="{StaticResource PanelTitle}" />
@@ -131,8 +131,15 @@
             </Border>
 
             <Grid x:Name="GeneratedFileRow" Grid.Row="5" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8"><Label Text="Generated file:" VerticalOptions="Center" /><Label x:Name="GeneratedPathLabel" Grid.Column="1" Text="No file generated" TextColor="{StaticResource Secondary}" LineBreakMode="TailTruncation" VerticalOptions="Center" /><Button x:Name="LocateButton" Grid.Column="2" Text="Locate" IsVisible="{OnPlatform Android=False, Default=True}" IsEnabled="False" Clicked="OnLocateClicked" /><Button x:Name="CopyPathButton" Grid.Column="3" Text="Copy Path" IsVisible="{OnPlatform Android=True, Default=False}" /></Grid>
-                <Label Grid.Row="6" Text="Developed by:&#xA;ゲロヴァショ　ジョン　ヴィンセント　シ" TextColor="{StaticResource Gray300}" HorizontalTextAlignment="Center" HorizontalOptions="Center" Margin="0,8,0,0" />
-            <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="6" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
+                <VerticalStackLayout Grid.Row="6" Spacing="8" HorizontalOptions="Center" Margin="0,0,0,4">
+                    <Grid ColumnDefinitions="Auto,Auto" ColumnSpacing="6" HorizontalOptions="Center">
+                        <Button x:Name="CheckForUpdateButton" Grid.Column="0" Text="Check for Update" Padding="10,6" FontSize="12" Clicked="OnCheckForUpdateClicked" />
+                        <Border x:Name="UpdateAvailableDot" Grid.Column="1" WidthRequest="12" HeightRequest="12" StrokeThickness="0" BackgroundColor="Red" IsVisible="False" StrokeShape="RoundRectangle 6" VerticalOptions="Center" HorizontalOptions="Center" />
+                    </Grid>
+                    <Label Text="{Binding AppVersionText}" TextColor="{StaticResource Gray300}" HorizontalTextAlignment="Center" HorizontalOptions="Center" />
+                    <Label Text="Developed by:&#xA;ゲロヴァショ　ジョン　ヴィンセント　シ" TextColor="{StaticResource Gray300}" HorizontalTextAlignment="Center" HorizontalOptions="Center" />
+                </VerticalStackLayout>
+            <ActivityIndicator x:Name="BusyIndicator" Grid.RowSpan="9" IsVisible="False" IsRunning="False" Color="{StaticResource Secondary}" />
             </Grid>
         </ScrollView>
     </Grid>

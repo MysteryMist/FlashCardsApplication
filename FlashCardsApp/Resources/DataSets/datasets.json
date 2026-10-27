@@ -1,10 +1,30 @@
 [
   {
-    "name": "N4 Kanji Verbs",
-    "file": "N4-Kanji-Verbs.flashcards"
+    "name": "N5 Kanji Adverbs",
+    "file": "N5-Kanji-Adverbs.flashcards"
   },
   {
     "name": "N5 Kanji Verbs",
     "file": "N5-Kanji-Verbs.flashcards"
+  },
+  {
+    "name": "N5 Kanji I-Adjectives",
+    "file": "N5-Kanji-I-Adjectives.flashcards"
+  },
+  {
+    "name": "N5 Kanji Na-Adjectives",
+    "file": "N5-Kanji-Na-Adjectives.flashcards"
+  },
+  {
+    "name": "N4 Kanji Verbs",
+    "file": "N4-Kanji-Verbs.flashcards"
+  },
+  {
+    "name": "N4 Kanji I-Adjectives",
+    "file": "N4-Kanji-I-Adjectives.flashcards"
+  },
+  {
+    "name": "N4 Kanji Na-Adjectives",
+    "file": "N4-Kanji-Na-Adjectives.flashcards"
   }
 ]
