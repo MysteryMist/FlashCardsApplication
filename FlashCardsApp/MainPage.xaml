@@ -2,26 +2,41 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
              x:Class="FlashCardsApp.MainPage"
              Title="Flash Cards"
-             BackgroundColor="{StaticResource Gray950}">
+             BackgroundColor="{AppThemeBinding Light=#EEF5F1, Dark={StaticResource Gray950}}">
     <ContentPage.Resources>
-        <Style TargetType="Label"><Setter Property="TextColor" Value="{StaticResource White}" /></Style>
+        <Style TargetType="Label"><Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource DracoBlack}, Dark={StaticResource White}}" /></Style>
         <Style x:Key="PanelTitle" TargetType="Label">
             <Setter Property="FontAttributes" Value="Bold" /><Setter Property="FontSize" Value="16" />
+            <Setter Property="TextColor" Value="{AppThemeBinding Light={StaticResource DracoGreen}, Dark={StaticResource DracoGreenSoft}}" />
+        </Style>
+        <Style x:Key="SectionCard" TargetType="Border">
+            <Setter Property="BackgroundColor" Value="{AppThemeBinding Light=#F0F5F2, Dark={StaticResource DracoPanelAlt}}" />
+            <Setter Property="Stroke" Value="{AppThemeBinding Light={StaticResource DracoGreenSoft}, Dark={StaticResource DracoLine}}" />
+            <Setter Property="StrokeThickness" Value="2" />
+            <Setter Property="StrokeShape" Value="RoundRectangle 20" />
+            <Setter Property="Padding" Value="14" />
         </Style>
         <Style x:Key="GrayButton" TargetType="Button">
             <Setter Property="BackgroundColor" Value="{StaticResource Gray600}" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Shadow" Value="{OnPlatform Android=null, Default='0,4,12,#00000055'}" />
         </Style>
         <Style x:Key="GreenButton" TargetType="Button">
-            <Setter Property="BackgroundColor" Value="{StaticResource Primary}" />
+            <Setter Property="BackgroundColor" Value="{StaticResource DracoGreenLight}" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="10,8" />
+            <Setter Property="Shadow" Value="{OnPlatform Android=null, Default='0,4,10,#2E7D3255'}" />
         </Style>
         <Style x:Key="NavigationButton" TargetType="Button">
             <Setter Property="BackgroundColor" Value="{StaticResource Tertiary}" /><Setter Property="CornerRadius" Value="28" />
             <Setter Property="FontSize" Value="24" /><Setter Property="Padding" Value="0" />
             <Setter Property="WidthRequest" Value="56" /><Setter Property="HeightRequest" Value="56" />
+            <Setter Property="Shadow" Value="{OnPlatform Android=null, Default='0,6,16,#1B4D3655'}" />
         </Style>
     </ContentPage.Resources>
 
-    <Grid x:Name="RootLayout" RowDefinitions="Auto,Auto,Auto,*">
+    <Grid x:Name="RootLayout" RowDefinitions="Auto,Auto,Auto,*" Padding="{OnPlatform Android='0,8,0,8', Default='0,14,0,14'}">
         <Grid x:Name="AndroidMaximizedFlashAreaHeader" Grid.Row="1" IsVisible="False" Padding="12,4,12,4" ColumnDefinitions="*,Auto,*" ColumnSpacing="8">
             <VerticalStackLayout Spacing="2">
                 <Label Text="FLASH AREA" Style="{StaticResource PanelTitle}" />
@@ -46,8 +61,8 @@
         </Border>
 
         <ScrollView x:Name="PageScroll" Grid.Row="3" VerticalScrollBarVisibility="Default" SizeChanged="OnPageScrollSizeChanged">
-            <Grid x:Name="Workspace" Padding="12" RowSpacing="12" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto,Auto">
-            <Border x:Name="TopControlPanel" Grid.Row="0" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+            <Grid x:Name="Workspace" Padding="{OnPlatform Android='12,10,12,10', Default='18,16,18,18'}" RowSpacing="14" RowDefinitions="Auto,Auto,Auto,560,Auto,Auto,Auto,Auto">
+            <Border x:Name="TopControlPanel" Grid.Row="0" Style="{StaticResource SectionCard}">
                 <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
                     <Label Text="TOP CONTROL PANEL" Style="{StaticResource PanelTitle}" />
                     <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="8">
@@ -58,7 +73,7 @@
                 </Grid>
             </Border>
 
-            <Border x:Name="DataManagementPanel" Grid.Row="1" Padding="10" BackgroundColor="#26352A" Stroke="{StaticResource Gray600}" StrokeShape="RoundRectangle 12">
+            <Border x:Name="DataManagementPanel" Grid.Row="1" Style="{StaticResource SectionCard}">
                 <Grid RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
                     <Label Text="DATA MANAGEMENT" Style="{StaticResource PanelTitle}" />
                     <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" ColumnSpacing="8">
@@ -82,18 +97,20 @@
                 <Label x:Name="StatusLabel" Grid.Column="2" Text="Ready" TextColor="{StaticResource Secondary}" HorizontalOptions="End" VerticalOptions="Center" />
             </Grid>
 
-            <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="10" MinimumHeightRequest="560" BackgroundColor="{StaticResource OffBlack}" Stroke="{StaticResource Primary}" StrokeThickness="2" StrokeShape="RoundRectangle 16">
-                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="5">
-                    <Grid x:Name="FlashCardControls" Grid.Row="0" ZIndex="2" ColumnDefinitions="*,*" RowDefinitions="Auto,Auto" ColumnSpacing="4" RowSpacing="4">
-                        <Button x:Name="MaximizeButton" Grid.Row="0" Grid.Column="0" Text="Maximize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMaximizeClicked" />
-                        <Button x:Name="MinimizeButton" Grid.Row="0" Grid.Column="0" Text="Minimize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" IsVisible="False" Clicked="OnMinimizeClicked" />
-                        <Button x:Name="ResetZoomButton" Grid.Row="0" Grid.Column="1" Text="Reset" Padding="4,8" FontSize="12" IsEnabled="False" Clicked="OnResetZoomClicked" />
-                        <Button x:Name="ZoomInButton" Grid.Row="1" Grid.Column="0" Text="Zoom In" Padding="4,8" FontSize="12" Clicked="OnZoomInClicked" />
-                        <Button x:Name="ZoomOutButton" Grid.Row="1" Grid.Column="1" Text="Zoom Out" Padding="4,8" FontSize="12" Clicked="OnZoomOutClicked" />
-                    </Grid>
-                    <Grid Grid.Row="1" ColumnDefinitions="56,*,56">
+            <Border x:Name="FlashCardBorder" Grid.Row="3" Padding="12" MinimumHeightRequest="560" BackgroundColor="{StaticResource DracoBlack}" Stroke="{StaticResource DracoGreenLight}" StrokeThickness="2" StrokeShape="RoundRectangle 24">
+                <Grid RowDefinitions="Auto,*,Auto,Auto" RowSpacing="8">
+                    <Border Grid.Row="0" Padding="8,6" BackgroundColor="{AppThemeBinding Light=#EAF3ED, Dark=#0D1714}" Stroke="{AppThemeBinding Light={StaticResource DracoGreenSoft}, Dark={StaticResource DracoLine}}" StrokeThickness="1" StrokeShape="RoundRectangle 14">
+                        <Grid x:Name="FlashCardControls" ZIndex="2" RowDefinitions="Auto,Auto" ColumnDefinitions="*,*" ColumnSpacing="6" RowSpacing="6">
+                            <Button x:Name="MaximizeButton" Grid.Row="0" Grid.Column="0" Text="Maximize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" Clicked="OnMaximizeClicked" />
+                            <Button x:Name="MinimizeButton" Grid.Row="0" Grid.Column="0" Text="Minimize" Style="{StaticResource GreenButton}" Padding="2,6" FontSize="11" IsVisible="False" Clicked="OnMinimizeClicked" />
+                            <Button x:Name="ResetZoomButton" Grid.Row="0" Grid.Column="1" Text="Reset" Padding="4,8" FontSize="12" IsEnabled="False" Clicked="OnResetZoomClicked" />
+                            <Button x:Name="ZoomInButton" Grid.Row="1" Grid.Column="0" Text="Zoom In" Padding="4,8" FontSize="12" Clicked="OnZoomInClicked" />
+                            <Button x:Name="ZoomOutButton" Grid.Row="1" Grid.Column="1" Text="Zoom Out" Padding="4,8" FontSize="12" Clicked="OnZoomOutClicked" />
+                        </Grid>
+                    </Border>
+                    <Grid Grid.Row="1" ColumnDefinitions="56,*,56" ColumnSpacing="10">
                         <Button x:Name="PreviousButton" Grid.Column="0" ZIndex="1" Text="‹" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnPreviousClicked" />
-                        <Border x:Name="FlashImageFrame" Grid.Column="1" ZIndex="0" Stroke="Black" StrokeThickness="2" StrokeShape="RoundRectangle 8" HorizontalOptions="Center" VerticalOptions="Center">
+                        <Border x:Name="FlashImageFrame" Grid.Column="1" ZIndex="0" Stroke="{StaticResource DracoGreenLight}" StrokeThickness="2" StrokeShape="RoundRectangle 18" HorizontalOptions="Center" VerticalOptions="Center" BackgroundColor="#0F1916">
                             <Image x:Name="FlashImage" Source="dotnet_bot.png" Aspect="AspectFit" HorizontalOptions="Fill" VerticalOptions="Fill">
                                 <Image.GestureRecognizers>
                                     <TapGestureRecognizer Tapped="OnFlashImageTapped" />
@@ -104,16 +121,16 @@
                         </Border>
                         <Button x:Name="NextButton" Grid.Column="2" ZIndex="1" Text="›" Style="{StaticResource NavigationButton}" VerticalOptions="Center" Clicked="OnNextClicked" />
                     </Grid>
-                    <Label x:Name="CardNameLabel" Grid.Row="2" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" />
-                    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="4" HorizontalOptions="Center">
-                        <Button x:Name="RollButton" Grid.Column="0" Text="↻ Roll" WidthRequest="80" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnRollClicked" />
-                        <Button x:Name="FlashButton" Grid.Column="1" Text="Flash" WidthRequest="80" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashClicked" />
-                        <Button x:Name="FlashAllButton" Grid.Column="2" Text="Flash All" WidthRequest="80" HeightRequest="50" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashAllClicked" />
+                    <Label x:Name="CardNameLabel" Grid.Row="2" Text="No cards loaded" FontSize="24" FontAttributes="Bold" HorizontalTextAlignment="Center" TextColor="{StaticResource White}" />
+                    <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,Auto" ColumnSpacing="6" HorizontalOptions="Center">
+                        <Button x:Name="RollButton" Grid.Column="0" Text="↻ Roll" WidthRequest="94" HeightRequest="52" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnRollClicked" />
+                        <Button x:Name="FlashButton" Grid.Column="1" Text="Flash" WidthRequest="94" HeightRequest="52" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashClicked" />
+                        <Button x:Name="FlashAllButton" Grid.Column="2" Text="Flash All" WidthRequest="94" HeightRequest="52" Padding="4,8" FontSize="13" Style="{StaticResource GreenButton}" Clicked="OnFlashAllClicked" />
                     </Grid>
                 </Grid>
             </Border>
 
-            <Border x:Name="DiscardSection" Grid.Row="4" Padding="10" Stroke="{StaticResource Gray600}" StrokeThickness="2" StrokeShape="RoundRectangle 12">
+            <Border x:Name="DiscardSection" Grid.Row="4" Style="{StaticResource SectionCard}">
                 <Grid RowDefinitions="Auto,*" RowSpacing="6">
                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                         <VerticalStackLayout Spacing="0" VerticalOptions="Center">

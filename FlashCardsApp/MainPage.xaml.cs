@@ -41,7 +41,7 @@ public partial class MainPage : ContentPage
     private double _panStartTranslationX;
     private double _panStartTranslationY;
     private double _pinchStartScale = 1;
-    private CancellationTokenSource? _wheelResetCancellation;
+    private CancellationTokenSource? _wheelResetCancellation = null;
 #if ANDROID
     private CancellationTokenSource? _androidPanHoldCancellation;
     private bool _androidPanActive;
@@ -284,7 +284,7 @@ public partial class MainPage : ContentPage
 
     private async void OnAddImageClicked(object? sender, EventArgs e)
     {
-        var action = await DisplayActionSheet("Add cards", "Cancel", null, "Add one card", "Add front/back batches");
+        var action = await DisplayActionSheetAsync("Add cards", "Cancel", null, "Add one card", "Add front/back batches");
         if (action == "Add one card")
             await AddSingleImageAsync();
         else if (action == "Add front/back batches")
@@ -295,7 +295,7 @@ public partial class MainPage : ContentPage
     {
         if (Cards.Count == 0)
         {
-            await DisplayAlert("View deck", "Add or load cards before opening the deck.", "OK");
+            await DisplayAlertAsync("View deck", "Add or load cards before opening the deck.", "OK");
             return;
         }
 
@@ -364,7 +364,7 @@ public partial class MainPage : ContentPage
         backFiles = backFiles.OrderBy(file => file.FileName, NaturalFileNameComparer.Instance).ToList();
         if (frontFiles.Count != backFiles.Count)
         {
-            await DisplayAlert("Add image batch", $"The front batch has {frontFiles.Count} images and the back batch has {backFiles.Count}. Select the same number of each side.", "OK");
+            await DisplayAlertAsync("Add image batch", $"The front batch has {frontFiles.Count} images and the back batch has {backFiles.Count}. Select the same number of each side.", "OK");
             return;
         }
 
@@ -408,7 +408,7 @@ public partial class MainPage : ContentPage
     private async Task<bool> ConfirmImageDataReplacementAsync(int incomingCardCount)
     {
         var cardText = incomingCardCount == 1 ? "1 card" : $"{incomingCardCount} cards";
-        return await DisplayAlert(
+        return await DisplayAlertAsync(
             "Overwrite current data?",
             $"Adding these images will replace all {Cards.Count} cards currently loaded with {cardText}. Continue?",
             "Overwrite",
@@ -424,10 +424,13 @@ public partial class MainPage : ContentPage
                 PickerTitle = title,
                 FileTypes = FilePickerFileType.Images
             });
-            var selectedFiles = files?.ToList();
+            var selectedFiles = files?
+                .Where(file => file is not null)
+                .Select(file => file!)
+                .ToList();
             if (selectedFiles is not null && selectedFiles.Any(file => !IsImageFile(file.FileName)))
             {
-                await DisplayAlert("File selection", "Please select only image files.", "OK");
+                await DisplayAlertAsync("File selection", "Please select only image files.", "OK");
                 return null;
             }
 
@@ -435,14 +438,14 @@ public partial class MainPage : ContentPage
         }
         catch (Exception ex)
         {
-            await DisplayAlert("File selection", ex.Message, "OK");
+            await DisplayAlertAsync("File selection", ex.Message, "OK");
             return null;
         }
     }
 
     private async void OnLoadDataClicked(object? sender, EventArgs e)
     {
-        var source = await DisplayActionSheet("Load data", "Cancel", null, "From device", "Built-in or saved dataset");
+        var source = await DisplayActionSheetAsync("Load data", "Cancel", null, "From device", "Built-in or saved dataset");
         if (source == "Built-in or saved dataset")
         {
             await LoadBuiltInDataSetAsync();
@@ -469,7 +472,7 @@ public partial class MainPage : ContentPage
             if (Cards.Count > 0)
             {
                 ValidateCards(Cards);
-                var overwriteConfirmed = await DisplayAlert(
+                var overwriteConfirmed = await DisplayAlertAsync(
                     "Overwrite current data?",
                     $"Validated {imported.Count} incoming cards. Loading them will replace all {Cards.Count} current cards. Continue?",
                     "Overwrite",
@@ -502,16 +505,16 @@ public partial class MainPage : ContentPage
                 return;
             if (choices.Count == 0)
             {
-                await DisplayAlert($"{operation} data", "No built-in or saved datasets are available.", "OK");
+                await DisplayAlertAsync($"{operation} data", "No built-in or saved datasets are available.", "OK");
                 return;
             }
 
-            var selectedName = await DisplayActionSheet($"Select a dataset to {operation.ToLowerInvariant()}", "Cancel", null, choices.Select(choice => choice.DisplayName).ToArray());
+            var selectedName = await DisplayActionSheetAsync($"Select a dataset to {operation.ToLowerInvariant()}", "Cancel", null, choices.Select(choice => choice.DisplayName).ToArray());
             var selectedChoice = choices.FirstOrDefault(choice => choice.DisplayName == selectedName);
             if (selectedChoice is null)
                 return;
 
-            var selectedAction = await DisplayActionSheet(
+            var selectedAction = await DisplayActionSheetAsync(
                 $"Dataset: {selectedChoice.Name}",
                 "Cancel",
                 "Delete",
@@ -521,7 +524,7 @@ public partial class MainPage : ContentPage
                 var confirmationMessage = selectedChoice.IsPackaged
                     ? $"Remove '{selectedChoice.Name}' from the dataset chooser? The built-in package remains installed."
                     : $"Delete '{selectedChoice.Name}' from this app? This cannot be undone.";
-                var confirmed = await DisplayAlert(
+                var confirmed = await DisplayAlertAsync(
                     selectedChoice.IsPackaged ? "Hide built-in dataset" : "Delete saved dataset",
                     confirmationMessage,
                     selectedChoice.IsPackaged ? "Hide" : "Delete",
@@ -537,7 +540,7 @@ public partial class MainPage : ContentPage
                     }
                     catch (Exception ex)
                     {
-                        await DisplayAlert("Remove dataset", ex.Message, "OK");
+                        await DisplayAlertAsync("Remove dataset", ex.Message, "OK");
                     }
                 }
 
@@ -561,7 +564,7 @@ public partial class MainPage : ContentPage
         {
             return await FileSystem.OpenAppPackageFileAsync(relativePath);
         }
-        catch (FileNotFoundException) { }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
 
         var pathCandidates = new[]
         {
@@ -688,7 +691,7 @@ public partial class MainPage : ContentPage
 
     private async void OnIncrementDataClicked(object? sender, EventArgs e)
     {
-        var source = await DisplayActionSheet("Increment data", "Cancel", null, "From device", "Built-in or saved dataset");
+        var source = await DisplayActionSheetAsync("Increment data", "Cancel", null, "From device", "Built-in or saved dataset");
         if (source == "Built-in or saved dataset")
         {
             await LoadBuiltInDataSetAsync(increment: true);
@@ -725,7 +728,7 @@ public partial class MainPage : ContentPage
                 .ToList();
             if (newCards.Count == 0)
             {
-                await DisplayAlert("Increment data", "Validation found no new cards to add.", "OK");
+                await DisplayAlertAsync("Increment data", "Validation found no new cards to add.", "OK");
                 return;
             }
 
@@ -733,7 +736,7 @@ public partial class MainPage : ContentPage
             ValidateCards(mergedCards);
             if (Cards.Count > 0)
             {
-                var incrementConfirmed = await DisplayAlert(
+                var incrementConfirmed = await DisplayAlertAsync(
                     "Add to current data?",
                     $"Validated {imported.Count} incoming cards. {newCards.Count} new cards will be added to the current {Cards.Count} cards. Continue?",
                     "Add",
@@ -756,14 +759,14 @@ public partial class MainPage : ContentPage
     {
         if (!Cards.Any())
         {
-            await DisplayAlert("Export JSON", "Add or load at least one card first.", "OK");
+            await DisplayAlertAsync("Export JSON", "Add or load at least one card first.", "OK");
             return;
         }
 
         await RunBusyAsync(async () =>
         {
             ValidateCards(Cards);
-            var generateConfirmed = await DisplayAlert(
+            var generateConfirmed = await DisplayAlertAsync(
                 "Export JSON",
                 $"Validated {Cards.Count} cards. Save the JSON file now?",
                 "Yes",
@@ -805,7 +808,7 @@ public partial class MainPage : ContentPage
     {
         if (Cards.Count == 0)
         {
-            await DisplayAlert("Save dataset", "Add or load at least one card first.", "OK");
+            await DisplayAlertAsync("Save dataset", "Add or load at least one card first.", "OK");
             return;
         }
 
@@ -822,13 +825,13 @@ public partial class MainPage : ContentPage
         var datasetName = SanitizeDataSetName(enteredName);
         if (string.IsNullOrWhiteSpace(datasetName))
         {
-            await DisplayAlert("Save dataset", "Enter a valid dataset name.", "OK");
+            await DisplayAlertAsync("Save dataset", "Enter a valid dataset name.", "OK");
             return;
         }
 
         var targetPath = Path.Combine(UserDataSetsDirectory, $"{datasetName}.flashcards");
         if (File.Exists(targetPath) &&
-            !await DisplayAlert("Replace dataset", $"A saved dataset named '{datasetName}' already exists. Replace it?", "Replace", "Cancel"))
+            !await DisplayAlertAsync("Replace dataset", $"A saved dataset named '{datasetName}' already exists. Replace it?", "Replace", "Cancel"))
             return;
 
         await RunBusyAsync(async () =>
@@ -861,10 +864,10 @@ public partial class MainPage : ContentPage
     {
         if (CurrentCard is null)
         {
-            await DisplayAlert("Edit", "There is no current card to edit.", "OK");
+            await DisplayAlertAsync("Edit", "There is no current card to edit.", "OK");
             return;
         }
-        var action = await DisplayActionSheet(
+        var action = await DisplayActionSheetAsync(
             "Edit card",
             "Cancel",
             null,
@@ -916,7 +919,7 @@ public partial class MainPage : ContentPage
     {
         while (true)
         {
-            var action = await DisplayActionSheet(
+            var action = await DisplayActionSheetAsync(
                 "Front image added",
                 "Cancel",
                 null,
@@ -967,7 +970,7 @@ public partial class MainPage : ContentPage
     {
         while (true)
         {
-            var action = await DisplayActionSheet(
+            var action = await DisplayActionSheetAsync(
                 "Back image added",
                 "Cancel",
                 null,
@@ -1068,7 +1071,7 @@ public partial class MainPage : ContentPage
                 _androidPanActive = false;
                 _ = ResetAndroidPanAsync(wasAndroidPanActive);
 #else
-                _ = FlashImageFrame.TranslateTo(0, 0, 250, Easing.SinOut);
+                _ = FlashImageFrame.TranslateToAsync(0, 0, 250, Easing.SinOut);
 #endif
                 break;
         }
@@ -1085,7 +1088,7 @@ public partial class MainPage : ContentPage
 
             _androidPanActive = true;
             _androidSuppressTapUntil = DateTime.UtcNow.AddMilliseconds(500);
-            await FlashImageFrame.ScaleTo(Math.Min(_imageScale * 1.05, 2), 100, Easing.SinOut);
+            await FlashImageFrame.ScaleToAsync(Math.Min(_imageScale * 1.05, 2), 100, Easing.SinOut);
         }
         catch (OperationCanceledException)
         {
@@ -1094,10 +1097,10 @@ public partial class MainPage : ContentPage
 
     private async Task ResetAndroidPanAsync(bool wasActive)
     {
-        await FlashImageFrame.TranslateTo(0, 0, 250, Easing.CubicOut);
+        await FlashImageFrame.TranslateToAsync(0, 0, 250, Easing.CubicOut);
         if (wasActive)
         {
-            await FlashImageFrame.ScaleTo(1, 250, Easing.CubicOut);
+            await FlashImageFrame.ScaleToAsync(1, 250, Easing.CubicOut);
             SetZoom(1);
         }
     }
@@ -1145,7 +1148,7 @@ public partial class MainPage : ContentPage
 #if ANDROID
     private async Task ResetAndroidPinchAsync()
     {
-        await FlashImageFrame.ScaleTo(1, 250, Easing.CubicOut);
+        await FlashImageFrame.ScaleToAsync(1, 250, Easing.CubicOut);
         SetZoom(1);
     }
 #endif
@@ -1182,7 +1185,7 @@ public partial class MainPage : ContentPage
 
     private async Task AnimateGestureScaleBackAsync()
     {
-        await FlashImageFrame.ScaleTo(1, 250, Easing.SinInOut);
+        await FlashImageFrame.ScaleToAsync(1, 250, Easing.SinInOut);
         SetZoom(1);
     }
 
@@ -1301,7 +1304,7 @@ public partial class MainPage : ContentPage
         var remaining = Cards.Except(DiscardedCards).ToList();
         if (remaining.Count == 0)
         {
-            await DisplayAlert("Flash all", "There are no cards on hand to flash.", "OK");
+            await DisplayAlertAsync("Flash all", "There are no cards on hand to flash.", "OK");
             return;
         }
 
@@ -1312,11 +1315,11 @@ public partial class MainPage : ContentPage
         if (incompleteCard is not null)
         {
             StatusLabel.Text = "Flash All validation failed";
-            await DisplayAlert("Flash all", "Every card must have a name, front image, and back image before using Flash All.", "OK");
+            await DisplayAlertAsync("Flash all", "Every card must have a name, front image, and back image before using Flash All.", "OK");
             return;
         }
 
-        var confirmed = await DisplayAlert(
+        var confirmed = await DisplayAlertAsync(
             "Flash all",
             $"Move all {remaining.Count} cards to the discard area?",
             "Yes",
@@ -1445,7 +1448,7 @@ public partial class MainPage : ContentPage
 
         if (!TryParsePositiveSeconds(input, out var seconds))
         {
-            await DisplayAlert("Auto Roll", "Enter a positive number of seconds.", "OK");
+            await DisplayAlertAsync("Auto Roll", "Enter a positive number of seconds.", "OK");
             return;
         }
 
@@ -1594,10 +1597,12 @@ public partial class MainPage : ContentPage
 
         StopButton.BackgroundColor = isRunning ? green : gray;
         PauseButton.BackgroundColor = isRunning ? green : gray;
-        MaximizeButton.BackgroundColor = green;
-        MinimizeButton.BackgroundColor = green;
+        var maximizeActive = !_isMaximized && !isRunning;
+        var minimizeActive = _isMaximized && !isRunning;
+        MaximizeButton.BackgroundColor = maximizeActive ? green : gray;
+        MinimizeButton.BackgroundColor = minimizeActive ? green : gray;
         ResetZoomButton.BackgroundColor = ResetZoomButton.IsEnabled && !isRunning ? green : gray;
-        AndroidMaximizedMinimizeButton.BackgroundColor = green;
+        AndroidMaximizedMinimizeButton.BackgroundColor = minimizeActive ? green : gray;
         AndroidMaximizedResetZoomButton.BackgroundColor = AndroidMaximizedResetZoomButton.IsEnabled && !isRunning ? green : gray;
         AndroidMaximizedZoomInButton.BackgroundColor = AndroidMaximizedZoomInButton.IsEnabled && !isRunning ? green : gray;
         AndroidMaximizedZoomOutButton.BackgroundColor = AndroidMaximizedZoomOutButton.IsEnabled && !isRunning ? green : gray;
@@ -1655,7 +1660,7 @@ public partial class MainPage : ContentPage
     }
 
     private Task ShowNoCardsWarningAsync() =>
-        DisplayAlert("No cards available", "There are no more cards to flash or roll.", "OK");
+        DisplayAlertAsync("No cards available", "There are no more cards to flash or roll.", "OK");
 
     private async void OnReturnClicked(object? sender, EventArgs e)
     {
@@ -1674,11 +1679,11 @@ public partial class MainPage : ContentPage
         var selectedCards = DiscardCollection.SelectedItems.Cast<FlashCard>().ToList();
         if (selectedCards.Count == 0)
         {
-            await DisplayAlert("Delete", "Select at least one discarded card before deleting.", "OK");
+            await DisplayAlertAsync("Delete", "Select at least one discarded card before deleting.", "OK");
             return;
         }
 
-        var confirmed = await DisplayAlert(
+        var confirmed = await DisplayAlertAsync(
             "Delete selected images",
             "Are you sure you want to delete the selected images?",
             "Delete",
@@ -1693,7 +1698,7 @@ public partial class MainPage : ContentPage
         }
 
         DiscardCollection.SelectedItems = new ObservableCollection<object>();
-        if (!Cards.Contains(_currentCard))
+        if (_currentCard is null || !Cards.Contains(_currentCard))
             _currentCard = Cards.Except(DiscardedCards).FirstOrDefault();
         RefreshFlashArea();
         UpdateDiscardActions();
@@ -1878,7 +1883,7 @@ public partial class MainPage : ContentPage
 
         if (!File.Exists(generatedPath))
         {
-            await DisplayAlert("Generated file", "The generated file is no longer available.", "OK");
+            await DisplayAlertAsync("Generated file", "The generated file is no longer available.", "OK");
             return;
         }
 
@@ -1899,7 +1904,7 @@ public partial class MainPage : ContentPage
                 await Launcher.Default.OpenAsync(new Uri($"file://{folder.Replace("\\", "/")}"));
 #endif
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             try
             {
@@ -1907,7 +1912,7 @@ public partial class MainPage : ContentPage
             }
             catch (Exception shareException)
             {
-                await DisplayAlert("Generated file", $"Unable to open or share the file: {shareException.Message}", "OK");
+                await DisplayAlertAsync("Generated file", $"Unable to open or share the file: {shareException.Message}", "OK");
             }
         }
     }
@@ -1950,19 +1955,19 @@ public partial class MainPage : ContentPage
             if (status.UpdateAvailable)
             {
                 var message = $"A new version ({status.LatestVersionText}) is available. Open the release page to download it?";
-                var shouldOpen = await DisplayAlert("Update available", message, "Open", "Later");
+                var shouldOpen = await DisplayAlertAsync("Update available", message, "Open", "Later");
                 if (shouldOpen && !string.IsNullOrWhiteSpace(_updateReleaseUrl))
                     await Microsoft.Maui.ApplicationModel.Launcher.Default.OpenAsync(new Uri(_updateReleaseUrl));
                 return;
             }
 
             if (forceUserPrompt)
-                await DisplayAlert("Update check", "You are already on the latest version.", "OK");
+                await DisplayAlertAsync("Update check", "You are already on the latest version.", "OK");
         }
         catch (Exception)
         {
             if (forceUserPrompt)
-                await DisplayAlert("Update check", "No update information could be fetched right now. Please try again later.", "OK");
+                await DisplayAlertAsync("Update check", "No update information could be fetched right now. Please try again later.", "OK");
         }
         finally
         {
@@ -1980,11 +1985,11 @@ public partial class MainPage : ContentPage
         UpdateAvailableDot.IsVisible = _updateAvailable;
     }
 
-    private async void OnCopyPathClicked(object sender, EventArgs e)
+    private async void OnCopyPathClicked(object? sender, EventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_generatedFilePath) || !File.Exists(_generatedFilePath))
         {
-            await DisplayAlert("Copy path", "Path File not available or not generated yet", "OK");
+            await DisplayAlertAsync("Copy path", "Path File not available or not generated yet", "OK");
             return;
         }
 
@@ -1995,7 +2000,7 @@ public partial class MainPage : ContentPage
         }
         catch (Exception ex)
         {
-            await DisplayAlert("Copy path", $"Unable to copy the file path: {ex.Message}", "OK");
+            await DisplayAlertAsync("Copy path", $"Unable to copy the file path: {ex.Message}", "OK");
         }
     }
 
@@ -2154,7 +2159,7 @@ public partial class MainPage : ContentPage
             var file = await FilePicker.Default.PickAsync(new PickOptions { PickerTitle = title, FileTypes = pickerType });
             if (!isJson && !isPackage && !isData && file is not null && !IsImageFile(file.FileName))
             {
-                await DisplayAlert("File selection", "Please select an image file.", "OK");
+                await DisplayAlertAsync("File selection", "Please select an image file.", "OK");
                 return null;
             }
 
@@ -2162,7 +2167,7 @@ public partial class MainPage : ContentPage
         }
         catch (Exception ex)
         {
-            await DisplayAlert("File selection", ex.Message, "OK");
+            await DisplayAlertAsync("File selection", ex.Message, "OK");
             return null;
         }
     }
@@ -2346,7 +2351,7 @@ public partial class MainPage : ContentPage
         catch (Exception ex)
         {
             StatusLabel.Text = "Validation failed";
-            await DisplayAlert("Operation failed", ex.Message, "OK");
+            await DisplayAlertAsync("Operation failed", ex.Message, "OK");
         }
         finally
         {

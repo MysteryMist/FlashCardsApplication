@@ -2,6 +2,7 @@
 using Android.Content.PM;
 using Android.OS;
 using Android.Views;
+using AndroidX.Core.View;
 
 namespace FlashCardsApp
 {
@@ -60,20 +61,23 @@ namespace FlashCardsApp
         {
             if (Build.VERSION.SdkInt >= BuildVersionCodes.R)
             {
+#pragma warning disable CA1416
                 Window?.InsetsController?.Hide(WindowInsets.Type.StatusBars() | WindowInsets.Type.NavigationBars());
                 Window!.InsetsController!.SystemBarsBehavior = (int)WindowInsetsControllerBehavior.ShowTransientBarsBySwipe;
+#pragma warning restore CA1416
                 return;
             }
 
             if (Window is not null)
             {
-                Window.DecorView.SystemUiVisibility = (StatusBarVisibility)(
-                    SystemUiFlags.Fullscreen |
-                    SystemUiFlags.HideNavigation |
-                    SystemUiFlags.ImmersiveSticky |
-                    SystemUiFlags.LayoutFullscreen |
-                    SystemUiFlags.LayoutHideNavigation |
-                    SystemUiFlags.LayoutStable);
+#pragma warning disable CA1416
+                var insetsController = WindowCompat.GetInsetsController(Window, Window.DecorView);
+                if (insetsController is not null)
+                {
+                    insetsController.Hide(WindowInsetsCompat.Type.SystemBars());
+                    insetsController.SystemBarsBehavior = WindowInsetsControllerCompat.BehaviorShowTransientBarsBySwipe;
+                }
+#pragma warning restore CA1416
             }
         }
     }
